@@ -25,6 +25,7 @@ vi.mock("./vortexControl", () => ({
   })),
   listMods: vi.fn(() => []),
   listLoadOrder: vi.fn(() => []),
+  listCategories: vi.fn(() => []),
   setModsEnabled: vi.fn(async () => undefined),
   deployMods: vi.fn(async () => undefined),
   purgeMods: vi.fn(async () => undefined),
@@ -134,7 +135,13 @@ describe("mcpServer HTTP gating", () => {
     expect(res.status).toBe(200);
     const names = parseToolNames(res.body);
     expect(names).toEqual(
-      expect.arrayContaining(["vortex_query", "vortex_describe", "list_mods", "list_load_order"]),
+      expect.arrayContaining([
+        "vortex_query",
+        "vortex_describe",
+        "list_mods",
+        "list_load_order",
+        "list_categories",
+      ]),
     );
     expect(names).not.toEqual(
       expect.arrayContaining([

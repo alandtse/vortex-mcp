@@ -305,6 +305,50 @@ export function listMods(
   return options.limit !== undefined ? summaries.slice(0, options.limit) : summaries;
 }
 
+export interface CategorySummary {
+  id: string;
+  name: string;
+  order: number;
+  parentCategory?: string;
+  modCount: number;
+}
+
+/**
+ * Lists a game's mod categories with a mod count per category — a join
+ * state.persistent.categories[gameId] alone can't do, same reasoning as list_mods.
+ */
+export function listCategories(api: IExtensionApi, gameId?: string): CategorySummary[] {
+  const st = state(api);
+  const targetGameId = gameId ?? selectors.activeGameId(st);
+  if (!targetGameId) {
+    throw new Error("No active game and no gameId provided");
+  }
+  const categories =
+    (queryStatePath(api, ["persistent", "categories", targetGameId]) as
+      | Record<string, { name: string; order: number; parentCategory?: string }>
+      | undefined) ?? {};
+  const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
+  const modCounts = new Map<string, number>();
+  for (const mod of Object.values(mods)) {
+    const category = mod.attributes?.category;
+    if (category === undefined) {
+      continue;
+    }
+    const key = String(category);
+    modCounts.set(key, (modCounts.get(key) ?? 0) + 1);
+  }
+
+  return Object.entries(categories)
+    .map(([id, cat]) => ({
+      id,
+      name: cat.name,
+      order: cat.order,
+      parentCategory: cat.parentCategory,
+      modCount: modCounts.get(id) ?? 0,
+    }))
+    .toSorted((a, b) => a.order - b.order);
+}
+
 export interface LoadOrderEntry {
   plugin: string;
   index: number;

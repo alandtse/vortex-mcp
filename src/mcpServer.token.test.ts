@@ -25,6 +25,7 @@ vi.mock("./vortexControl", () => ({
   })),
   listMods: vi.fn(() => []),
   listLoadOrder: vi.fn(() => []),
+  listCategories: vi.fn(() => []),
   setModsEnabled: vi.fn(async () => undefined),
   deployMods: vi.fn(async () => undefined),
   purgeMods: vi.fn(async () => undefined),

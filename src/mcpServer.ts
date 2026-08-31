@@ -126,6 +126,23 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
       content: [{ type: "text", text: JSON.stringify(control.listLoadOrder(api), null, 2) }],
     }),
   );
+
+  server.registerTool(
+    "list_categories",
+    {
+      description:
+        "List a game's mod categories (defaults to the active game), sorted by display order, " +
+        "with a mod count per category — a join vortex_query can't do in one call.",
+      inputSchema: z.object({
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+      }),
+    },
+    async ({ gameId }) => ({
+      content: [
+        { type: "text", text: JSON.stringify(control.listCategories(api, gameId), null, 2) },
+      ],
+    }),
+  );
 }
 
 function registerWriteTools(server: McpServer, api: IExtensionApi): void {

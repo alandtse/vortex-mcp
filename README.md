@@ -60,6 +60,7 @@ even show them — when `VORTEX_MCP_TOKEN` is set (see [Safety](#safety)).
 | `vortex_query`         | read   | Call a named selector, or walk the Redux state tree by path. General-purpose read.                                                                                  |
 | `list_mods`            | read   | Mods for a game with friendly names and enabled state — a join `vortex_query` can't do in one call. Supports `enabledOnly`/`nameFilter`/`limit` for large modlists. |
 | `list_load_order`      | read   | Current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index.                                                                                          |
+| `list_categories`      | read   | A game's mod categories sorted by display order, with a mod count per category.                                                                                     |
 | `switch_profile`       | write  | Switch to a different profile by id.                                                                                                                                |
 | `clone_profile`        | write  | Clone a profile into a new one (on-disk directory + mod state) — Vortex's own "Clone" operation.                                                                    |
 | `vortex_dispatch`      | write  | Dispatch a named, allowlisted action creator — mod/category/load-order/deployment/download actions.                                                                 |
@@ -132,7 +133,8 @@ alone, is what stops a DNS-rebinding page from reaching the server as
 same-origin.
 
 **Writes fail closed on `VORTEX_MCP_TOKEN`.** With no token set, only the
-read tools (`vortex_describe`, `vortex_query`, `list_mods`, `list_load_order`) are ever
+read tools (`vortex_describe`, `vortex_query`, `list_mods`, `list_load_order`,
+`list_categories`) are ever
 registered — `switch_profile`/`set_mods_enabled`/`deploy_mods`/`purge_mods`/
 `install_mod_from_url`/`activate_game` don't exist to call. Set
 `VORTEX_MCP_TOKEN` to require `Authorization: Bearer <token>` on every

@@ -45,6 +45,7 @@ import {
   describeApi,
   dispatchAction,
   installModFromUrl,
+  listCategories,
   listLoadOrder,
   listMods,
   purgeMods,
@@ -316,6 +317,57 @@ describe("vortexControl: listLoadOrder", () => {
     (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({});
 
     expect(() => listLoadOrder(api)).toThrow(/No plugin load order/);
+  });
+});
+
+describe("vortexControl: listCategories", () => {
+  it("sorts by order and joins mod counts per category", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        categories: {
+          skyrimse: {
+            "20": { name: "Skyrim Special Edition", order: 1 },
+            "22": { name: "Buildings", order: 2, parentCategory: "20" },
+          },
+        },
+        mods: {
+          skyrimse: {
+            modA: { id: "modA", type: "", installationPath: "", attributes: { category: "22" } },
+            modB: { id: "modB", type: "", installationPath: "", attributes: { category: "22" } },
+            modC: { id: "modC", type: "", installationPath: "" },
+          },
+        },
+      },
+    });
+
+    expect(listCategories(api)).toEqual([
+      {
+        id: "20",
+        name: "Skyrim Special Edition",
+        order: 1,
+        parentCategory: undefined,
+        modCount: 0,
+      },
+      { id: "22", name: "Buildings", order: 2, parentCategory: "20", modCount: 2 },
+    ]);
+  });
+
+  it("throws when there is no active game and none was provided", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("");
+
+    expect(() => listCategories(fakeApi())).toThrow(/No active game/);
+  });
+
+  it("returns an empty list when the game has no categories", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: { categories: {}, mods: {} },
+    });
+
+    expect(listCategories(api)).toEqual([]);
   });
 });
 
