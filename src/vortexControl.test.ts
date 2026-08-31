@@ -84,6 +84,10 @@ describe("vortexControl: reflection", () => {
     expect(result.stateKeys).toEqual([]);
     expect(result.dispatchableActions).toContain("setLoadOrder");
     expect(result.dispatchableActions).not.toContain("setNextProfile");
+    expect(result.dispatchHints.setModEnabled).toBe(
+      "profileId: string, modId: string, enable: boolean",
+    );
+    expect(result.dispatchHints).not.toHaveProperty("setNextProfile");
     expect(result.extensionApis).toEqual([]);
   });
 

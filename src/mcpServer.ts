@@ -30,11 +30,14 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
         "Discover the live Vortex API surface: callable selector names (for vortex_query), " +
         "the subset of action names actually callable via vortex_dispatch " +
         "(`dispatchableActions` — `actions` itself lists everything but most aren't directly " +
-        "callable), top-level Redux state keys (for vortex_query's path mode, includes state " +
-        "added by any loaded extension, not just core Vortex), and `extensionApis` — names " +
-        "extensions have exposed via registerAPI (api.ext.<name>), informational only, not " +
-        "callable through this server. Reflects whatever Vortex is actually running right now " +
-        "— new selectors/actions/state show up here without an extension rebuild.",
+        "callable) with their real positional argument order (`dispatchHints`, e.g. " +
+        'dispatchHints.setModEnabled = "profileId: string, modId: string, enable: boolean"), ' +
+        "top-level Redux state keys (for vortex_query's path mode, includes state added by any " +
+        "loaded extension, not just core Vortex), and `extensionApis` — names extensions have " +
+        "exposed via registerAPI (api.ext.<name>), informational only, not callable through " +
+        "this server. Reflects whatever Vortex is actually running right now — new selectors/" +
+        "actions/state show up here without an extension rebuild (dispatchHints is the one " +
+        "field that's static, sourced from Vortex's own type declarations).",
       inputSchema: z.object({}),
     },
     async () => ({

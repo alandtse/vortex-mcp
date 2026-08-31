@@ -84,11 +84,16 @@ that reflection can't do in one call.
 `vortex_dispatch` extends the same reflection principle to writes, but only
 for the ~150 `actions` entries that are plain Redux action creators — call
 it, dispatch what comes back. It's gated by a hard-coded allowlist
-(`DISPATCHABLE_ACTIONS` in `vortexControl.ts`) covering standard mod/
-category/load-order/deployment/download actions, deliberately excluding
-admin-level ones (game/install/download _paths_, extensions, credentials,
-profile deletion) even though they're otherwise callable the same way — the
-allowlist is the actual enforcement boundary, not just documentation. The
+(`DISPATCHABLE_ACTIONS` in `vortexControl.ts`, a `Map<name, argHint>`)
+covering standard mod/category/load-order/deployment/download actions,
+deliberately excluding admin-level ones (game/install/download _paths_,
+extensions, credentials, profile deletion) even though they're otherwise
+callable the same way — the allowlist is the actual enforcement boundary,
+not just documentation. Each entry's value is its real positional argument
+order, read from `@nexusmods/vortex-api`'s payload field names (or, for the
+three entries typed `any` there, from their actual definitions in Vortex
+source) — surfaced via `vortex_describe`'s `dispatchHints` so a caller
+doesn't need to go read source to use `vortex_dispatch` correctly. The
 remaining hand-written write tools exist because they genuinely aren't
 `actions[name](...args)` calls: `setModsEnabled` takes `api` directly and
 must be awaited rather than dispatched; `deploy_mods`/`purge_mods`/

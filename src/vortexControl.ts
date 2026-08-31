@@ -89,6 +89,8 @@ export interface ApiDescription {
   actions: string[];
   /** Subset of `actions` actually callable via vortex_dispatch — see DISPATCHABLE_ACTIONS. */
   dispatchableActions: string[];
+  /** Positional argument order for each dispatchableActions entry, e.g. "gameId: string, modId: string". */
+  dispatchHints: Record<string, string>;
   /** Top-level keys of the Redux state tree, walkable via query({ path }). */
   stateKeys: string[];
   /**
@@ -107,7 +109,8 @@ export function describeApi(api: IExtensionApi): ApiDescription {
   return {
     selectors: Object.keys(selectors).toSorted(),
     actions: Object.keys(actions).toSorted(),
-    dispatchableActions: [...DISPATCHABLE_ACTIONS].toSorted(),
+    dispatchableActions: [...DISPATCHABLE_ACTIONS.keys()].toSorted(),
+    dispatchHints: Object.fromEntries(DISPATCHABLE_ACTIONS),
     stateKeys: Object.keys(st as object).toSorted(),
     extensionApis: Object.keys(api.ext ?? {}).toSorted(),
   };
@@ -138,47 +141,54 @@ export function queryStatePath(api: IExtensionApi, statePath: string[]): unknown
 // credentials/auth, profile deletion, window/network state — even though those are
 // otherwise plain action creators the same reflection mechanism could reach. This
 // allowlist is the actual enforcement boundary, not just a documentation note.
-const DISPATCHABLE_ACTIONS = new Set([
-  "addMod",
-  "addMods",
-  "addModRule",
-  "clearModRules",
-  "removeMod",
-  "removeModRule",
-  "setModAttribute",
-  "setModAttributes",
-  "setModArchiveId",
-  "setModEnabled",
-  "setModInstallationPath",
-  "setModState",
-  "setModType",
-  "setCategory",
-  "setCategoryOrder",
-  "removeCategory",
-  "renameCategory",
-  "loadCategories",
-  "updateCategories",
-  "setFileOverride",
-  "setINITweakEnabled",
-  "setLoadOrder",
-  "setLoadOrderEntry",
-  "setFBLoadOrder",
-  "setFBLoadOrderEntry",
-  "setPendingPluginSort",
-  "clearPendingPluginSort",
-  "setActivator",
-  "setAutoDeployment",
-  "setCleanupOnDeploy",
-  "setConfirmPurge",
-  "setDeploymentNecessary",
-  "setDownloadModInfo",
-  "setDownloadHash",
-  "mergeDownloadModInfo",
-  "pauseDownload",
-  "removeDownload",
-  "removeDownloadSilent",
-  "setDownloadInstalled",
-  "setDownloadInterrupted",
+//
+// The value is the real positional argument order (name: type), read from
+// @nexusmods/vortex-api's action-creator payload field names — or, for the three
+// entries typed `any` there (setLoadOrderEntry/setFBLoadOrder/setFBLoadOrderEntry),
+// from their actual definitions in Vortex source (mod_load_order/file_based_loadorder).
+// Surfaced via vortex_describe's dispatchHints so a caller doesn't need to go read
+// either source to use vortex_dispatch correctly.
+const DISPATCHABLE_ACTIONS = new Map<string, string>([
+  ["addMod", "gameId: string, mod: IMod"],
+  ["addMods", "gameId: string, mods: IMod[]"],
+  ["addModRule", "gameId: string, modId: string, rule: IModRule"],
+  ["clearModRules", "gameId: string, modId: string"],
+  ["removeMod", "gameId: string, modId: string"],
+  ["removeModRule", "gameId: string, modId: string, rule: IModRule"],
+  ["setModAttribute", "gameId: string, modId: string, attribute: string, value: any"],
+  ["setModAttributes", "gameId: string, modId: string, attributes: Record<string, any>"],
+  ["setModArchiveId", "gameId: string, modId: string, archiveId: string"],
+  ["setModEnabled", "profileId: string, modId: string, enable: boolean"],
+  ["setModInstallationPath", "gameId: string, modId: string, installPath: string"],
+  ["setModState", "gameId: string, modId: string, modState: ModState"],
+  ["setModType", "gameId: string, modId: string, type: string"],
+  ["setCategory", "gameId: string, id: string, category: ICategory"],
+  ["setCategoryOrder", "gameId: string, categoryIds: string[]"],
+  ["removeCategory", "gameId: string, id: string"],
+  ["renameCategory", "gameId: string, categoryId: string, name: string"],
+  ["loadCategories", "gameId: string, gameCategories: ICategoryDictionary"],
+  ["updateCategories", "gameId: string, gameCategories: ICategoryDictionary"],
+  ["setFileOverride", "gameId: string, modId: string, files: string[]"],
+  ["setINITweakEnabled", "gameId: string, modId: string, tweak: string, enabled: boolean"],
+  ["setLoadOrder", "id: string, order: unknown[]"],
+  ["setLoadOrderEntry", "profileId: string, modId: string, loEntry: ILoadOrderEntry"],
+  ["setFBLoadOrder", "profileId: string, loadOrder: LoadOrder"],
+  ["setFBLoadOrderEntry", "profileId: string, loEntry: ILoadOrderEntry"],
+  ["setPendingPluginSort", "profileId: string, collectionId: string, time: number"],
+  ["clearPendingPluginSort", "profileId: string"],
+  ["setActivator", "gameId: string, activatorId: string"],
+  ["setAutoDeployment", "deploy: boolean"],
+  ["setCleanupOnDeploy", "cleanup: boolean"],
+  ["setConfirmPurge", "confirm: boolean"],
+  ["setDeploymentNecessary", "gameId: string, required: boolean"],
+  ["setDownloadModInfo", "id: string, key: string, value: any"],
+  ["setDownloadHash", "id: string, fileMD5: string"],
+  ["mergeDownloadModInfo", "id: string, value: any"],
+  ["pauseDownload", "id: string, paused: boolean"],
+  ["removeDownload", "id: string"],
+  ["removeDownloadSilent", "id: string"],
+  ["setDownloadInstalled", "id: string, gameId: string, modId: string"],
+  ["setDownloadInterrupted", "id: string, realReceived: number"],
 ]);
 
 /**

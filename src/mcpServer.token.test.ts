@@ -11,6 +11,7 @@ vi.mock("./vortexControl", () => ({
     selectors: [],
     actions: [],
     dispatchableActions: [],
+    dispatchHints: {},
     stateKeys: [],
     extensionApis: [],
   })),
