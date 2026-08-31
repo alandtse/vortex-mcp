@@ -10,10 +10,14 @@ endpoint, no clicking through the UI.
 
 Unit- and integration-tested (real HTTP requests against the actual server,
 real Host/Origin/token gating, real MCP `initialize` handshake) — see
-`pnpm run test`. Verified working against a real, live Vortex install:
-profile clone/switch, mod listing/filtering (a real 692-mod profile),
-load-order reads, and generic action dispatch all confirmed against real
-state.
+`pnpm run test`. Every read tool and every write tool except
+`install_mod_from_url` has been live-verified against a real Vortex
+install, including a full write cycle (`set_mods_enabled`, `deploy_mods`,
+`purge_mods`, `vortex_dispatch`) against a disposable test profile, with a
+`backup_state` snapshot taken before starting.
+`install_mod_from_url` is deliberately never exercised outside unit tests
+— it can trigger a blocking "choose install type" modal for ambiguous
+archives, unsafe to risk unsupervised.
 
 ## Stack
 
@@ -54,23 +58,31 @@ For a stdio-only client, bridge with the off-the-shelf `mcp-remote`:
 Read tools are always available. Write tools only exist — `tools/list` won't
 even show them — when `VORTEX_MCP_TOKEN` is set (see [Safety](#safety)).
 
-| Tool                   | Access | What it does                                                                                                                                                        |
-| ---------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vortex_describe`      | read   | Discover live selector/action names and state-tree keys — no rebuild needed for new vortex-api surface.                                                             |
-| `vortex_query`         | read   | Call a named selector, or walk the Redux state tree by path. General-purpose read.                                                                                  |
-| `list_mods`            | read   | Mods for a game with friendly names and enabled state — a join `vortex_query` can't do in one call. Supports `enabledOnly`/`nameFilter`/`limit` for large modlists. |
-| `list_load_order`      | read   | Current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index.                                                                                          |
-| `list_categories`      | read   | A game's mod categories sorted by display order, with a mod count per category.                                                                                     |
-| `switch_profile`       | write  | Switch to a different profile by id.                                                                                                                                |
-| `clone_profile`        | write  | Clone a profile into a new one (on-disk directory + mod state) — Vortex's own "Clone" operation.                                                                    |
-| `vortex_dispatch`      | write  | Dispatch a named, allowlisted action creator — mod/category/load-order/deployment/download actions.                                                                 |
-| `backup_state`         | write  | Write a full state snapshot to Vortex's own backup folder — reproduces Vortex's un-exported backup fn.                                                              |
-| `set_mods_enabled`     | write  | Enable/disable a set of mods for a profile. Does not deploy.                                                                                                        |
-| `deploy_mods`          | write  | Deploy currently enabled mods for the active profile.                                                                                                               |
-| `purge_mods`           | write  | Purge (undeploy) all deployed mod files for the active profile.                                                                                                     |
-| `install_mod_from_url` | write  | Download and install a mod from a URL (e.g. an `nxm://` link).                                                                                                      |
-| `activate_game`        | write  | Switch Vortex's active game mode.                                                                                                                                   |
-| `vortex_restart`       | write  | Restart Vortex via its own graceful relaunch (Vortex's "Restart now" path) — not a hard process kill.                                                               |
+Generated from the live server's actual `tools/list` response — see
+[Keeping this table in sync](#keeping-this-table-in-sync) — rather than
+hand-transcribed, so it can't silently drift from the code.
+
+<!-- TOOLS_TABLE_START -->
+
+| Tool                   | Access | What it does                                                                                                                                 |
+| ---------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vortex_describe`      | read   | Discover the live Vortex API surface: callable selector names (for vortex_query), the subset of action names actually callable via vortex_d… |
+| `vortex_query`         | read   | Read Vortex state. Two modes: `selector` calls that named vortex-api selector as `(state, ...args)` (e.g. selector='activeProfileId', or se… |
+| `list_mods`            | read   | List mods for a game (defaults to the active game), with friendly names and enabled state for the active profile — a formatted join vortex_… |
+| `list_load_order`      | read   | List the current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index.                                                          |
+| `list_categories`      | read   | List a game's mod categories (defaults to the active game), sorted by display order, with a mod count per category — a join vortex_query ca… |
+| `switch_profile`       | write  | Switch Vortex to a different profile by id.                                                                                                  |
+| `clone_profile`        | write  | Clone an existing profile into a new one (copies its on-disk profile directory — load order, ini tweaks — plus its mod enabled-state), the…  |
+| `vortex_dispatch`      | write  | Dispatch a named, allowlisted Vortex action creator — mod metadata/rules, categories, load order, deployment settings, download bookkeeping. |
+| `backup_state`         | write  | Create a full snapshot of Vortex's settings/persistent/app/user state as a JSON file in Vortex's own backup folder (%APPDATA%/vortex/temp/s… |
+| `set_mods_enabled`     | write  | Enable or disable a set of mods for a profile (defaults to the active profile).                                                              |
+| `deploy_mods`          | write  | Deploy currently enabled mods for the active profile.                                                                                        |
+| `purge_mods`           | write  | Purge (undeploy) all deployed mod files for the active profile.                                                                              |
+| `install_mod_from_url` | write  | Download and install a mod from a URL (e.g. an nxm:// link or direct download URL).                                                          |
+| `activate_game`        | write  | Switch Vortex's active game mode.                                                                                                            |
+| `vortex_restart`       | write  | Restart Vortex via its own graceful relaunch (same path as Vortex's 'Restart now' button): closes windows and lets Vortex's normal shutdown… |
+
+<!-- TOOLS_TABLE_END -->
 
 `vortex_describe`/`vortex_query` deliberately replace the old one-tool-per-
 selector design (`list_profiles`, `get_active_profile`) — an
@@ -102,6 +114,29 @@ callback positions per event; `clone_profile` is a filesystem copy plus a
 dispatch. None of that is reachable by name-based reflection no matter how
 uniform the simple case gets — the validation and orchestration in those
 wrappers is the point, not boilerplate to genericize away.
+
+### Keeping this table in sync
+
+The tools table above is generated, not hand-written — it comes straight
+from the live server's own `tools/list` response, the same ground truth
+`vortex_describe` reflects. That's a deliberate answer to how this project
+already went out of sync with itself twice in one session (a stale
+write-tool count, a table missing a tool that had shipped): a table
+transcribed by hand can drift from the code; a table generated from the
+running server's actual response cannot, by construction — the same
+principle behind `vortex_query`/`vortex_dispatch` themselves.
+
+```sh
+pnpm run docs:tools          # regenerate the table (needs Vortex running with this extension loaded)
+pnpm run docs:tools:check    # verify it's current; exits 1 if stale, prints what to run
+```
+
+This can't run in CI (no live Vortex instance there), so it's a local
+step — after adding/changing/removing a tool, run `docs:tools` before
+committing. The read/write access tier isn't part of MCP's `tools/list`
+response, so it stays a small hand-maintained map inside the generator
+script (`ACCESS_TIER` in `scripts/generate-readme-tools-table.mjs`) —
+everything else (names, descriptions, tool count) regenerates from reality.
 
 ## Architecture
 
@@ -139,16 +174,18 @@ same-origin.
 
 **Writes fail closed on `VORTEX_MCP_TOKEN`.** With no token set, only the
 read tools (`vortex_describe`, `vortex_query`, `list_mods`, `list_load_order`,
-`list_categories`) are ever
-registered — `switch_profile`/`set_mods_enabled`/`deploy_mods`/`purge_mods`/
-`install_mod_from_url`/`activate_game` don't exist to call. Set
-`VORTEX_MCP_TOKEN` to require `Authorization: Bearer <token>` on every
-request (reads included) _and_ unlock the write tools. There is still no
-per-tool authorization once a token is set — any client holding it has full
-write privileges, including `purge_mods` (deletes deployed game files) and
-`install_mod_from_url` (downloads and installs arbitrary content).
-Acceptable for a local single-user tool; do not bind this to a non-loopback
-address, and treat the token like any other local secret.
+`list_categories`) are ever registered — none of the ten write tools
+(`switch_profile`, `clone_profile`, `vortex_dispatch`, `backup_state`,
+`set_mods_enabled`, `deploy_mods`, `purge_mods`, `install_mod_from_url`,
+`activate_game`, `vortex_restart`) exist to call. Set `VORTEX_MCP_TOKEN` to
+require `Authorization: Bearer <token>` on every request (reads included)
+_and_ unlock the write tools. There is still no per-tool authorization once
+a token is set — any client holding it has full write privileges, including
+`purge_mods` (deletes deployed game files), `install_mod_from_url`
+(downloads and installs arbitrary content), and `vortex_restart` (kills and
+relaunches the whole app). Acceptable for a local single-user tool; do not
+bind this to a non-loopback address, and treat the token like any other
+local secret.
 
 ## License
 

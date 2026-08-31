@@ -17,7 +17,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "ci": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test && pnpm run build",
-    "install-plugin": "node scripts/install-local.mjs"
+    "install-plugin": "node scripts/install-local.mjs",
+    "docs:tools": "node scripts/generate-readme-tools-table.mjs",
+    "docs:tools:check": "node scripts/generate-readme-tools-table.mjs --check"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "2.0.0",
