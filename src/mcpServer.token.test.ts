@@ -7,7 +7,13 @@ vi.mock("@nexusmods/vortex-api", () => ({
 }));
 
 vi.mock("./vortexControl", () => ({
-  describeApi: vi.fn(() => ({ selectors: [], actions: [], stateKeys: [] })),
+  describeApi: vi.fn(() => ({
+    selectors: [],
+    actions: [],
+    dispatchableActions: [],
+    stateKeys: [],
+    extensionApis: [],
+  })),
   querySelector: vi.fn(() => undefined),
   queryStatePath: vi.fn(() => undefined),
   switchProfile: vi.fn(),
@@ -66,6 +72,14 @@ function request(
   });
 }
 
+function parseToolNames(body: string): string[] {
+  const dataLine = body.split("\n").find((line) => line.startsWith("data: "));
+  const parsed = JSON.parse(dataLine?.slice("data: ".length) ?? "{}") as {
+    result?: { tools?: Array<{ name: string }> };
+  };
+  return (parsed.result?.tools ?? []).map((tool) => tool.name);
+}
+
 describe("mcpServer bearer token gating", () => {
   beforeAll(async () => {
     process.env.VORTEX_MCP_PORT = "38174";
@@ -112,12 +126,17 @@ describe("mcpServer bearer token gating", () => {
       },
     );
     expect(res.status).toBe(200);
-    expect(res.body).toContain("purge_mods");
-    expect(res.body).toContain("switch_profile");
-    expect(res.body).toContain("clone_profile");
-    expect(res.body).toContain("vortex_dispatch");
-    expect(res.body).toContain("backup_state");
-    expect(res.body).toContain("install_mod_from_url");
-    expect(res.body).toContain("vortex_restart");
+    const names = parseToolNames(res.body);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "purge_mods",
+        "switch_profile",
+        "clone_profile",
+        "vortex_dispatch",
+        "backup_state",
+        "install_mod_from_url",
+        "vortex_restart",
+      ]),
+    );
   });
 });

@@ -28,9 +28,13 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
     {
       description:
         "Discover the live Vortex API surface: callable selector names (for vortex_query), " +
-        "Vortex's action-creator names (informational), and top-level Redux state keys (for " +
-        "vortex_query's path mode). Reflects whatever vortex-api version is actually running — " +
-        "new selectors/state show up here without an extension rebuild.",
+        "the subset of action names actually callable via vortex_dispatch " +
+        "(`dispatchableActions` — `actions` itself lists everything but most aren't directly " +
+        "callable), top-level Redux state keys (for vortex_query's path mode, includes state " +
+        "added by any loaded extension, not just core Vortex), and `extensionApis` — names " +
+        "extensions have exposed via registerAPI (api.ext.<name>), informational only, not " +
+        "callable through this server. Reflects whatever Vortex is actually running right now " +
+        "— new selectors/actions/state show up here without an extension rebuild.",
       inputSchema: z.object({}),
     },
     async () => ({
@@ -80,13 +84,32 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
     {
       description:
         "List mods for a game (defaults to the active game), with friendly names and enabled " +
-        "state for the active profile — a formatted join vortex_query can't do in one call.",
+        "state for the active profile — a formatted join vortex_query can't do in one call. " +
+        "A large modlist (hundreds of mods) can exceed the client's response size limit; use " +
+        "enabledOnly/nameFilter/limit to narrow the result rather than requesting everything.",
       inputSchema: z.object({
         gameId: z.string().optional().describe("Game id; defaults to the active game"),
+        enabledOnly: z.boolean().optional().describe("Only include currently-enabled mods"),
+        nameFilter: z.string().optional().describe("Case-insensitive substring match on mod name"),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Cap the number of results returned"),
       }),
     },
-    async ({ gameId }) => ({
-      content: [{ type: "text", text: JSON.stringify(control.listMods(api, gameId), null, 2) }],
+    async ({ gameId, enabledOnly, nameFilter, limit }) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            control.listMods(api, gameId, { enabledOnly, nameFilter, limit }),
+            null,
+            2,
+          ),
+        },
+      ],
     }),
   );
 

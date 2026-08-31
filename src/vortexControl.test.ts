@@ -81,6 +81,18 @@ describe("vortexControl: reflection", () => {
     expect(result.selectors).toContain("profiles");
     expect(result.actions).toContain("setNextProfile");
     expect(result.stateKeys).toEqual([]);
+    expect(result.dispatchableActions).toContain("setLoadOrder");
+    expect(result.dispatchableActions).not.toContain("setNextProfile");
+    expect(result.extensionApis).toEqual([]);
+  });
+
+  it("describeApi surfaces api.ext names as extensionApis without exposing the functions", () => {
+    const api = fakeApi();
+    (api as unknown as { ext: Record<string, unknown> }).ext = {
+      someExtensionHelper: () => undefined,
+    };
+
+    expect(describeApi(api).extensionApis).toEqual(["someExtensionHelper"]);
   });
 
   it("querySelector calls the named selector with state and extra args", () => {
@@ -225,6 +237,42 @@ describe("vortexControl: mods", () => {
     vi.mocked(selectors.activeGameId).mockReturnValue("");
 
     expect(() => listMods(fakeApi())).toThrow(/No active game/);
+  });
+
+  it("listMods filters by enabledOnly, nameFilter, and limit", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    vi.mocked(selectors.activeProfile).mockReturnValue({
+      id: "p1",
+      name: "First",
+      gameId: "skyrimse",
+      modState: {
+        modA: { enabled: true, enabledTime: 0 },
+        modC: { enabled: true, enabledTime: 0 },
+      },
+      lastActivated: 0,
+    });
+
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: {
+            modA: { id: "modA", state: "installed", type: "", installationPath: "" },
+            modB: { id: "modB", state: "installed", type: "", installationPath: "" },
+            modC: { id: "modC", state: "installed", type: "", installationPath: "" },
+          },
+        },
+      },
+    });
+
+    expect(listMods(api, undefined, { enabledOnly: true })).toEqual([
+      { id: "modA", name: "modA", type: "", version: undefined, enabled: true },
+      { id: "modC", name: "modC", type: "", version: undefined, enabled: true },
+    ]);
+    expect(listMods(api, undefined, { nameFilter: "MODB" })).toEqual([
+      { id: "modB", name: "modB", type: "", version: undefined, enabled: false },
+    ]);
+    expect(listMods(api, undefined, { limit: 1 })).toHaveLength(1);
   });
 
   it("setModsEnabled uses an explicit profileId over the active one", async () => {

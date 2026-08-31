@@ -10,9 +10,10 @@ endpoint, no clicking through the UI.
 
 Unit- and integration-tested (real HTTP requests against the actual server,
 real Host/Origin/token gating, real MCP `initialize` handshake) — see
-`pnpm run test`. Verified working against a real, live Vortex install
-(`list_profiles`-equivalent/`list_mods` queried a real 692-mod profile).
-Load-order control is not yet implemented.
+`pnpm run test`. Verified working against a real, live Vortex install:
+profile clone/switch, mod listing/filtering (a real 692-mod profile),
+load-order reads, and generic action dispatch all confirmed against real
+state.
 
 ## Stack
 
@@ -53,22 +54,22 @@ For a stdio-only client, bridge with the off-the-shelf `mcp-remote`:
 Read tools are always available. Write tools only exist — `tools/list` won't
 even show them — when `VORTEX_MCP_TOKEN` is set (see [Safety](#safety)).
 
-| Tool                   | Access | What it does                                                                                            |
-| ---------------------- | ------ | ------------------------------------------------------------------------------------------------------- |
-| `vortex_describe`      | read   | Discover live selector/action names and state-tree keys — no rebuild needed for new vortex-api surface. |
-| `vortex_query`         | read   | Call a named selector, or walk the Redux state tree by path. General-purpose read.                      |
-| `list_mods`            | read   | Mods for a game with friendly names and enabled state — a join `vortex_query` can't do in one call.     |
-| `list_load_order`      | read   | Current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index.                              |
-| `switch_profile`       | write  | Switch to a different profile by id.                                                                    |
-| `clone_profile`        | write  | Clone a profile into a new one (on-disk directory + mod state) — Vortex's own "Clone" operation.        |
-| `vortex_dispatch`      | write  | Dispatch a named, allowlisted action creator — mod/category/load-order/deployment/download actions.     |
-| `backup_state`         | write  | Write a full state snapshot to Vortex's own backup folder — reproduces Vortex's un-exported backup fn.  |
-| `set_mods_enabled`     | write  | Enable/disable a set of mods for a profile. Does not deploy.                                            |
-| `deploy_mods`          | write  | Deploy currently enabled mods for the active profile.                                                   |
-| `purge_mods`           | write  | Purge (undeploy) all deployed mod files for the active profile.                                         |
-| `install_mod_from_url` | write  | Download and install a mod from a URL (e.g. an `nxm://` link).                                          |
-| `activate_game`        | write  | Switch Vortex's active game mode.                                                                       |
-| `vortex_restart`       | write  | Restart Vortex via its own graceful relaunch (Vortex's "Restart now" path) — not a hard process kill.   |
+| Tool                   | Access | What it does                                                                                                                                                        |
+| ---------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vortex_describe`      | read   | Discover live selector/action names and state-tree keys — no rebuild needed for new vortex-api surface.                                                             |
+| `vortex_query`         | read   | Call a named selector, or walk the Redux state tree by path. General-purpose read.                                                                                  |
+| `list_mods`            | read   | Mods for a game with friendly names and enabled state — a join `vortex_query` can't do in one call. Supports `enabledOnly`/`nameFilter`/`limit` for large modlists. |
+| `list_load_order`      | read   | Current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index.                                                                                          |
+| `switch_profile`       | write  | Switch to a different profile by id.                                                                                                                                |
+| `clone_profile`        | write  | Clone a profile into a new one (on-disk directory + mod state) — Vortex's own "Clone" operation.                                                                    |
+| `vortex_dispatch`      | write  | Dispatch a named, allowlisted action creator — mod/category/load-order/deployment/download actions.                                                                 |
+| `backup_state`         | write  | Write a full state snapshot to Vortex's own backup folder — reproduces Vortex's un-exported backup fn.                                                              |
+| `set_mods_enabled`     | write  | Enable/disable a set of mods for a profile. Does not deploy.                                                                                                        |
+| `deploy_mods`          | write  | Deploy currently enabled mods for the active profile.                                                                                                               |
+| `purge_mods`           | write  | Purge (undeploy) all deployed mod files for the active profile.                                                                                                     |
+| `install_mod_from_url` | write  | Download and install a mod from a URL (e.g. an `nxm://` link).                                                                                                      |
+| `activate_game`        | write  | Switch Vortex's active game mode.                                                                                                                                   |
+| `vortex_restart`       | write  | Restart Vortex via its own graceful relaunch (Vortex's "Restart now" path) — not a hard process kill.                                                               |
 
 `vortex_describe`/`vortex_query` deliberately replace the old one-tool-per-
 selector design (`list_profiles`, `get_active_profile`) — an

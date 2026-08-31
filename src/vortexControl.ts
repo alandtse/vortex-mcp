@@ -85,10 +85,21 @@ function store(api: IExtensionApi) {
 export interface ApiDescription {
   /** Names callable via query({ selector, args }) — each is (state, ...args) => value. */
   selectors: string[];
-  /** Names of Vortex's dispatchable action creators (informational; not directly callable — see query). */
+  /** All of Vortex's action-creator names (informational; most are NOT directly callable). */
   actions: string[];
+  /** Subset of `actions` actually callable via vortex_dispatch — see DISPATCHABLE_ACTIONS. */
+  dispatchableActions: string[];
   /** Top-level keys of the Redux state tree, walkable via query({ path }). */
   stateKeys: string[];
+  /**
+   * Names extensions have exposed via context.registerAPI (api.ext.<name>) — Vortex core's
+   * own (Nexus/Mods/Downloads helpers) plus any third-party extension that does the same.
+   * Informational only: unlike `dispatchableActions`, these are arbitrary extension
+   * functions with unvetted signatures and side effects, not uniform action creators, so
+   * there is no generic caller for them — same reasoning DISPATCHABLE_ACTIONS excludes
+   * admin-level actions. A specific one becomes a dedicated tool if it's actually needed.
+   */
+  extensionApis: string[];
 }
 
 export function describeApi(api: IExtensionApi): ApiDescription {
@@ -96,7 +107,9 @@ export function describeApi(api: IExtensionApi): ApiDescription {
   return {
     selectors: Object.keys(selectors).toSorted(),
     actions: Object.keys(actions).toSorted(),
+    dispatchableActions: [...DISPATCHABLE_ACTIONS].toSorted(),
     stateKeys: Object.keys(st as object).toSorted(),
+    extensionApis: Object.keys(api.ext ?? {}).toSorted(),
   };
 }
 
@@ -252,7 +265,20 @@ export async function cloneProfile(
   };
 }
 
-export function listMods(api: IExtensionApi, gameId?: string): ModSummary[] {
+export interface ListModsOptions {
+  /** Only include mods currently enabled for the profile. Default false (all mods). */
+  enabledOnly?: boolean;
+  /** Case-insensitive substring match against the rendered mod name. */
+  nameFilter?: string;
+  /** Cap the number of results (applied after filtering). Default unlimited. */
+  limit?: number;
+}
+
+export function listMods(
+  api: IExtensionApi,
+  gameId?: string,
+  options: ListModsOptions = {},
+): ModSummary[] {
   const st = state(api);
   const targetGameId = gameId ?? selectors.activeGameId(st);
   if (!targetGameId) {
@@ -260,14 +286,23 @@ export function listMods(api: IExtensionApi, gameId?: string): ModSummary[] {
   }
   const profile = selectors.activeProfile(st);
   const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
-  return Object.values(mods).map((mod) => ({
-    id: mod.id,
-    name: util.renderModName(mod),
-    type: mod.type,
-    version: mod.attributes?.version as string | undefined,
-    enabled:
-      profile?.gameId === targetGameId ? (profile?.modState?.[mod.id]?.enabled ?? false) : false,
-  }));
+  const nameFilterLower = options.nameFilter?.toLowerCase();
+
+  const summaries = Object.values(mods)
+    .map((mod) => ({
+      id: mod.id,
+      name: util.renderModName(mod),
+      type: mod.type,
+      version: mod.attributes?.version as string | undefined,
+      enabled:
+        profile?.gameId === targetGameId ? (profile?.modState?.[mod.id]?.enabled ?? false) : false,
+    }))
+    .filter((mod) => !options.enabledOnly || mod.enabled)
+    .filter(
+      (mod) => nameFilterLower === undefined || mod.name.toLowerCase().includes(nameFilterLower),
+    );
+
+  return options.limit !== undefined ? summaries.slice(0, options.limit) : summaries;
 }
 
 export interface LoadOrderEntry {

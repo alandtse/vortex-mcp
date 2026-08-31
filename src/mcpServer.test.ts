@@ -7,7 +7,13 @@ vi.mock("@nexusmods/vortex-api", () => ({
 }));
 
 vi.mock("./vortexControl", () => ({
-  describeApi: vi.fn(() => ({ selectors: [], actions: [], stateKeys: [] })),
+  describeApi: vi.fn(() => ({
+    selectors: [],
+    actions: [],
+    dispatchableActions: [],
+    stateKeys: [],
+    extensionApis: [],
+  })),
   querySelector: vi.fn(() => undefined),
   queryStatePath: vi.fn(() => undefined),
   switchProfile: vi.fn(),
@@ -72,6 +78,14 @@ const jsonHeaders = {
   accept: "application/json, text/event-stream",
 };
 
+function parseToolNames(body: string): string[] {
+  const dataLine = body.split("\n").find((line) => line.startsWith("data: "));
+  const parsed = JSON.parse(dataLine?.slice("data: ".length) ?? "{}") as {
+    result?: { tools?: Array<{ name: string }> };
+  };
+  return (parsed.result?.tools ?? []).map((tool) => tool.name);
+}
+
 describe("mcpServer HTTP gating", () => {
   beforeAll(async () => {
     process.env.VORTEX_MCP_PORT = "38173";
@@ -118,16 +132,20 @@ describe("mcpServer HTTP gating", () => {
       body: { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
     });
     expect(res.status).toBe(200);
-    expect(res.body).toContain("vortex_query");
-    expect(res.body).toContain("vortex_describe");
-    expect(res.body).toContain("list_mods");
-    expect(res.body).toContain("list_load_order");
-    expect(res.body).not.toContain("purge_mods");
-    expect(res.body).not.toContain("install_mod_from_url");
-    expect(res.body).not.toContain("switch_profile");
-    expect(res.body).not.toContain("clone_profile");
-    expect(res.body).not.toContain("vortex_dispatch");
-    expect(res.body).not.toContain("backup_state");
-    expect(res.body).not.toContain("vortex_restart");
+    const names = parseToolNames(res.body);
+    expect(names).toEqual(
+      expect.arrayContaining(["vortex_query", "vortex_describe", "list_mods", "list_load_order"]),
+    );
+    expect(names).not.toEqual(
+      expect.arrayContaining([
+        "purge_mods",
+        "install_mod_from_url",
+        "switch_profile",
+        "clone_profile",
+        "vortex_dispatch",
+        "backup_state",
+        "vortex_restart",
+      ]),
+    );
   });
 });
