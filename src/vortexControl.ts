@@ -448,7 +448,8 @@ export function listDownloads(api: IExtensionApi, gameId?: string): DownloadSumm
       id: download.id,
       name: download.modInfo?.name ?? download.localPath ?? download.id,
       state: download.state,
-      progress: download.size > 0 ? Math.round((download.received / download.size) * 100) : 0,
+      progress:
+        download.size > 0 ? Math.round(((download.received ?? 0) / download.size) * 100) : 0,
       size: download.size,
     }));
 }

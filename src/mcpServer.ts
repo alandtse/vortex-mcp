@@ -22,6 +22,15 @@ const HOST = "127.0.0.1";
 // hostname resolves to 127.0.0.1); the token is a second, independent gate for writes.
 const TOKEN = process.env.VORTEX_MCP_TOKEN;
 
+// JSON.stringify(undefined) returns the actual `undefined` value, not a string —
+// a legitimate result (an unresolved vortex_query path/selector, found live: an
+// MCP response's content[].text must be a string, so an ungated JSON.stringify
+// crashed the whole call at the SDK's own response-schema validation instead of
+// returning a clean "null"). `?? null` guarantees a real JSON string every time.
+function jsonText(value: unknown): { type: "text"; text: string } {
+  return { type: "text", text: JSON.stringify(value ?? null, null, 2) };
+}
+
 function registerReadTools(server: McpServer, api: IExtensionApi): void {
   server.registerTool(
     "vortex_describe",
@@ -41,7 +50,7 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
       inputSchema: z.object({}),
     },
     async () => ({
-      content: [{ type: "text", text: JSON.stringify(control.describeApi(api), null, 2) }],
+      content: [jsonText(control.describeApi(api))],
     }),
   );
 
@@ -62,21 +71,10 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
     },
     async ({ selector, args, path }) => {
       if (selector !== undefined) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(control.querySelector(api, selector, args), null, 2),
-            },
-          ],
-        };
+        return { content: [jsonText(control.querySelector(api, selector, args))] };
       }
       if (path !== undefined) {
-        return {
-          content: [
-            { type: "text", text: JSON.stringify(control.queryStatePath(api, path), null, 2) },
-          ],
-        };
+        return { content: [jsonText(control.queryStatePath(api, path))] };
       }
       throw new Error("Provide either `selector` or `path`.");
     },
@@ -103,16 +101,7 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
       }),
     },
     async ({ gameId, enabledOnly, nameFilter, limit }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            control.listMods(api, gameId, { enabledOnly, nameFilter, limit }),
-            null,
-            2,
-          ),
-        },
-      ],
+      content: [jsonText(control.listMods(api, gameId, { enabledOnly, nameFilter, limit }))],
     }),
   );
 
@@ -126,7 +115,7 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
       inputSchema: z.object({}),
     },
     async () => ({
-      content: [{ type: "text", text: JSON.stringify(control.listLoadOrder(api), null, 2) }],
+      content: [jsonText(control.listLoadOrder(api))],
     }),
   );
 
@@ -141,9 +130,7 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
       }),
     },
     async ({ gameId }) => ({
-      content: [
-        { type: "text", text: JSON.stringify(control.listCategories(api, gameId), null, 2) },
-      ],
+      content: [jsonText(control.listCategories(api, gameId))],
     }),
   );
 
@@ -159,9 +146,7 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
       }),
     },
     async ({ gameId }) => ({
-      content: [
-        { type: "text", text: JSON.stringify(control.listDownloads(api, gameId), null, 2) },
-      ],
+      content: [jsonText(control.listDownloads(api, gameId))],
     }),
   );
 
@@ -175,7 +160,7 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
       inputSchema: z.object({}),
     },
     async () => ({
-      content: [{ type: "text", text: JSON.stringify(control.listNotifications(api), null, 2) }],
+      content: [jsonText(control.listNotifications(api))],
     }),
   );
 
@@ -192,9 +177,7 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
       }),
     },
     async ({ modId, gameId }) => ({
-      content: [
-        { type: "text", text: JSON.stringify(control.listModRules(api, modId, gameId), null, 2) },
-      ],
+      content: [jsonText(control.listModRules(api, modId, gameId))],
     }),
   );
 }
@@ -234,7 +217,7 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
     },
     async ({ sourceProfileId, name }) => {
       const cloned = await control.cloneProfile(api, sourceProfileId, name);
-      return { content: [{ type: "text", text: JSON.stringify(cloned, null, 2) }] };
+      return { content: [jsonText(cloned)] };
     },
   );
 
@@ -259,7 +242,7 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
     },
     async ({ action, args }) => {
       const dispatched = control.dispatchAction(api, action, args);
-      return { content: [{ type: "text", text: JSON.stringify(dispatched, null, 2) }] };
+      return { content: [jsonText(dispatched)] };
     },
   );
 
