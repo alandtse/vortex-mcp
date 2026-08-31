@@ -423,3 +423,90 @@ export function activateGame(api: IExtensionApi, gameId: string): void {
   api.events.emit("activate-game", gameId);
   log("info", "[vortex-mcp] activated game", { gameId });
 }
+
+export interface DownloadSummary {
+  id: string;
+  name: string;
+  state: string;
+  progress: number;
+  size: number;
+}
+
+export function listDownloads(api: IExtensionApi, gameId?: string): DownloadSummary[] {
+  const st = state(api);
+  const targetGameId = gameId ?? selectors.activeGameId(st);
+  if (!targetGameId) {
+    throw new Error("No active game and no gameId provided");
+  }
+  const files =
+    (queryStatePath(api, ["persistent", "downloads", "files"]) as
+      | Record<string, types.IDownload>
+      | undefined) ?? {};
+  return Object.values(files)
+    .filter((download) => download.game.includes(targetGameId))
+    .map((download) => ({
+      id: download.id,
+      name: download.modInfo?.name ?? download.localPath ?? download.id,
+      state: download.state,
+      progress: download.size > 0 ? Math.round((download.received / download.size) * 100) : 0,
+      size: download.size,
+    }));
+}
+
+export interface NotificationSummary {
+  id?: string;
+  type: string;
+  title?: string;
+  message: string;
+}
+
+export function listNotifications(api: IExtensionApi): NotificationSummary[] {
+  const st = state(api);
+  const notifications = selectors.notifications(st) as types.INotification[];
+  return notifications.map((n) => ({ id: n.id, type: n.type, title: n.title, message: n.message }));
+}
+
+export interface ModRuleSummary {
+  type: string;
+  targetId: string;
+  /** Friendly name of the referenced mod, when it's installed and resolvable. */
+  targetName?: string;
+  versionMatch?: string;
+}
+
+/**
+ * Lists a mod's dependency/conflict rules (before/after/requires/conflicts/...),
+ * resolving each reference to the target mod's friendly name when it's installed
+ * — a join raw reflection can't do, same reasoning as list_mods/list_categories.
+ * Real data, not speculative: 184 of 692 mods in the live test profile have rules.
+ */
+export function listModRules(api: IExtensionApi, modId: string, gameId?: string): ModRuleSummary[] {
+  const st = state(api);
+  const targetGameId = gameId ?? selectors.activeGameId(st);
+  if (!targetGameId) {
+    throw new Error("No active game and no gameId provided");
+  }
+  const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
+  const mod = mods[modId];
+  if (mod === undefined) {
+    throw new Error(`Unknown mod: ${modId}`);
+  }
+  // IModRule extends an IRule base that isn't fully resolved in the published
+  // .d.ts (`type` on the rule, `versionMatch` on the reference are both real at
+  // runtime — confirmed against live state — but absent from the exported type).
+  type RealModRule = {
+    type: string;
+    reference: { id?: string; idHint?: string; versionMatch?: string };
+  };
+  return (mod.rules ?? []).map((ruleTyped) => {
+    const rule = ruleTyped as unknown as RealModRule;
+    const targetId = rule.reference.id ?? rule.reference.idHint ?? "(unresolved reference)";
+    const targetMod = mods[targetId];
+    return {
+      type: rule.type,
+      targetId,
+      targetName: targetMod !== undefined ? util.renderModName(targetMod) : undefined,
+      versionMatch: rule.reference.versionMatch,
+    };
+  });
+}

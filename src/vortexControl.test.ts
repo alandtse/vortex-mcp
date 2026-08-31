@@ -16,6 +16,7 @@ vi.mock("@nexusmods/vortex-api", () => ({
     profiles: vi.fn<() => Record<string, unknown>>(),
     activeGameId: vi.fn<() => string | undefined>(),
     knownGames: vi.fn<() => Array<{ id: string }>>(),
+    notifications: vi.fn<() => unknown[]>(),
   },
   util: {
     renderModName: vi.fn((mod: { id: string }) => mod.id),
@@ -46,8 +47,11 @@ import {
   dispatchAction,
   installModFromUrl,
   listCategories,
+  listDownloads,
   listLoadOrder,
+  listModRules,
   listMods,
+  listNotifications,
   purgeMods,
   queryStatePath,
   querySelector,
@@ -516,5 +520,108 @@ describe("vortexControl: backupState", () => {
       app: { a: 1 },
       user: { u: 1 },
     });
+  });
+});
+
+describe("vortexControl: listDownloads", () => {
+  it("filters downloads by game and computes progress percent", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        downloads: {
+          files: {
+            d1: {
+              id: "d1",
+              game: ["skyrimse"],
+              state: "finished",
+              size: 200,
+              received: 200,
+              modInfo: { name: "Cool Mod" },
+            },
+            d2: {
+              id: "d2",
+              game: ["fallout4"],
+              state: "finished",
+              size: 100,
+              received: 100,
+            },
+            d3: {
+              id: "d3",
+              game: ["skyrimse"],
+              state: "downloading",
+              size: 400,
+              received: 100,
+              localPath: "mod3.zip",
+            },
+          },
+        },
+      },
+    });
+
+    expect(listDownloads(api)).toEqual([
+      { id: "d1", name: "Cool Mod", state: "finished", progress: 100, size: 200 },
+      { id: "d3", name: "mod3.zip", state: "downloading", progress: 25, size: 400 },
+    ]);
+  });
+
+  it("throws when there is no active game and none was provided", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("");
+
+    expect(() => listDownloads(fakeApi())).toThrow(/No active game/);
+  });
+});
+
+describe("vortexControl: listNotifications", () => {
+  it("maps notifications to their summary fields", () => {
+    vi.mocked(selectors.notifications).mockReturnValue([
+      { id: "n1", type: "error", title: "Deployment failed", message: "Permission denied" },
+      { type: "info", message: "No title here" },
+    ]);
+
+    expect(listNotifications(fakeApi())).toEqual([
+      { id: "n1", type: "error", title: "Deployment failed", message: "Permission denied" },
+      { id: undefined, type: "info", title: undefined, message: "No title here" },
+    ]);
+  });
+});
+
+describe("vortexControl: listModRules", () => {
+  it("resolves rule references to friendly names when the target mod is installed", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: {
+            modA: {
+              id: "modA",
+              type: "",
+              installationPath: "",
+              rules: [
+                { type: "after", reference: { id: "modB", versionMatch: "*" } },
+                { type: "before", reference: { idHint: "unknown-mod" } },
+              ],
+            },
+            modB: { id: "modB", type: "", installationPath: "" },
+          },
+        },
+      },
+    });
+
+    expect(listModRules(api, "modA")).toEqual([
+      { type: "after", targetId: "modB", targetName: "modB", versionMatch: "*" },
+      { type: "before", targetId: "unknown-mod", targetName: undefined, versionMatch: undefined },
+    ]);
+  });
+
+  it("throws for an unknown mod id", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: { mods: { skyrimse: {} } },
+    });
+
+    expect(() => listModRules(api, "missing")).toThrow(/Unknown mod/);
   });
 });

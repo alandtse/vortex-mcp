@@ -146,6 +146,57 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
       ],
     }),
   );
+
+  server.registerTool(
+    "list_downloads",
+    {
+      description:
+        "List the download queue/history for a game (defaults to the active game): name, " +
+        "state, progress percent, size — a formatted view raw vortex_query selectors " +
+        "(downloadsForGame/activeDownloads) don't give you in one call.",
+      inputSchema: z.object({
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+      }),
+    },
+    async ({ gameId }) => ({
+      content: [
+        { type: "text", text: JSON.stringify(control.listDownloads(api, gameId), null, 2) },
+      ],
+    }),
+  );
+
+  server.registerTool(
+    "list_notifications",
+    {
+      description:
+        "List Vortex's current notifications (errors, warnings, info) — what Vortex itself " +
+        "is currently flagging as a problem, useful for diagnosing 'mod is enabled but " +
+        "doesn't work'-class issues.",
+      inputSchema: z.object({}),
+    },
+    async () => ({
+      content: [{ type: "text", text: JSON.stringify(control.listNotifications(api), null, 2) }],
+    }),
+  );
+
+  server.registerTool(
+    "list_mod_rules",
+    {
+      description:
+        "List a mod's dependency/conflict rules (before/after/requires/conflicts/...), " +
+        "resolving each reference to the target mod's friendly name when it's installed — " +
+        "a join vortex_query can't do in one call.",
+      inputSchema: z.object({
+        modId: z.string().describe("Mod id (query list_mods to find one)"),
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+      }),
+    },
+    async ({ modId, gameId }) => ({
+      content: [
+        { type: "text", text: JSON.stringify(control.listModRules(api, modId, gameId), null, 2) },
+      ],
+    }),
+  );
 }
 
 function registerWriteTools(server: McpServer, api: IExtensionApi): void {

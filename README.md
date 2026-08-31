@@ -182,7 +182,8 @@ same-origin.
 
 **Writes fail closed on `VORTEX_MCP_TOKEN`.** With no token set, only the
 read tools (`vortex_describe`, `vortex_query`, `list_mods`, `list_load_order`,
-`list_categories`) are ever registered — none of the ten write tools
+`list_categories`, `list_downloads`, `list_notifications`, `list_mod_rules`)
+are ever registered — none of the ten write tools
 (`switch_profile`, `clone_profile`, `vortex_dispatch`, `backup_state`,
 `set_mods_enabled`, `deploy_mods`, `purge_mods`, `install_mod_from_url`,
 `activate_game`, `vortex_restart`) exist to call. Set `VORTEX_MCP_TOKEN` to
