@@ -79,6 +79,9 @@ hand-transcribed, so it can't silently drift from the code.
 | `list_mods`            | read   | List mods for a game (defaults to the active game), with friendly names and enabled state for the active profile — a formatted join vortex_… |
 | `list_load_order`      | read   | List the current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index.                                                          |
 | `list_categories`      | read   | List a game's mod categories (defaults to the active game), sorted by display order, with a mod count per category — a join vortex_query ca… |
+| `list_downloads`       | read   | List the download queue/history for a game (defaults to the active game): name, state, progress percent, size — a formatted view raw vortex… |
+| `list_notifications`   | read   | List Vortex's current notifications (errors, warnings, info) — what Vortex itself is currently flagging as a problem, useful for diagnosing… |
+| `list_mod_rules`       | read   | List a mod's dependency/conflict rules (before/after/requires/conflicts/...), resolving each reference to the target mod's friendly name wh… |
 | `switch_profile`       | write  | Switch Vortex to a different profile by id.                                                                                                  |
 | `clone_profile`        | write  | Clone an existing profile into a new one (copies its on-disk profile directory — load order, ini tweaks — plus its mod enabled-state), the…  |
 | `vortex_dispatch`      | write  | Dispatch a named, allowlisted Vortex action creator — mod metadata/rules, categories, load order, deployment settings, download bookkeeping. |
