@@ -50,6 +50,14 @@ Streamable HTTP, so most clients connect natively:
 claude mcp add --transport http vortex http://127.0.0.1:3701/mcp
 ```
 
+If `VORTEX_MCP_TOKEN` is set (see [Safety](#safety)), every request —
+including reads — needs the header, or the connection fails outright:
+
+```sh
+claude mcp add --transport http vortex http://127.0.0.1:3701/mcp \
+  -H "Authorization: Bearer <token>"
+```
+
 For a stdio-only client, bridge with the off-the-shelf `mcp-remote`:
 `{ "command": "npx", "args": ["-y", "mcp-remote", "http://127.0.0.1:3701/mcp"] }`
 
