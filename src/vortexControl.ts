@@ -154,7 +154,13 @@ const DISPATCHABLE_ACTIONS = new Map<string, string>([
   ["addModRule", "gameId: string, modId: string, rule: IModRule"],
   ["clearModRules", "gameId: string, modId: string"],
   ["removeMod", "gameId: string, modId: string"],
-  ["removeModRule", "gameId: string, modId: string, rule: IModRule"],
+  [
+    "removeModRule",
+    "gameId: string, modId: string, rule: IModRule " +
+      "(must deep-match the stored rule exactly, incl. reducer-added fields like " +
+      "reference.idHint that addModRule fills in even if you didn't pass one — " +
+      "read the rule back via list_mod_rules/vortex_query first)",
+  ],
   ["setModAttribute", "gameId: string, modId: string, attribute: string, value: any"],
   ["setModAttributes", "gameId: string, modId: string, attributes: Record<string, any>"],
   ["setModArchiveId", "gameId: string, modId: string, archiveId: string"],
