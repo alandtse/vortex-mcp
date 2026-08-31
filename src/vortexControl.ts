@@ -27,6 +27,39 @@ export function restartVortex(): void {
   relaunch();
 }
 
+// Matches store.ts's FULL_BACKUP_PATH constant (not exported from @nexusmods/vortex-api),
+// so a backup taken here lands in the same folder as Vortex's own manual/hourly backups.
+const FULL_BACKUP_PATH = "state_backups_full";
+
+/**
+ * Writes a full snapshot of Vortex's settings/persistent/app/user state to Vortex's own
+ * backup folder, reproducing store.ts's createFullStateBackup (not exported from
+ * @nexusmods/vortex-api) from public pieces only: no session/extension persistors, no
+ * credentials — the same fields Vortex's own backup captures.
+ */
+export async function backupState(api: IExtensionApi, name = "mcp"): Promise<string> {
+  const st = state(api) as unknown as Record<string, unknown>;
+  const backup = {
+    settings: st.settings,
+    persistent: st.persistent,
+    app: st.app,
+    user: st.user,
+  };
+  const serialized = JSON.stringify(backup, undefined, 2);
+
+  const basePath = path.join(util.getVortexPath("userData"), "temp", FULL_BACKUP_PATH);
+  const backupFilePath = path.join(basePath, `${name}-${Date.now()}.json`);
+
+  await fs.ensureDirWritableAsync(basePath, () => Promise.resolve());
+  await util.writeFileAtomic(backupFilePath, serialized);
+
+  log("info", "[vortex-mcp] state backup created", {
+    path: backupFilePath,
+    size: serialized.length,
+  });
+  return backupFilePath;
+}
+
 export interface ModSummary {
   id: string;
   name: string;
@@ -84,6 +117,83 @@ export function queryStatePath(api: IExtensionApi, statePath: string[]): unknown
     value = (value as Record<string, unknown>)[key];
   }
   return value;
+}
+
+// Standard user-tooling actions only: mod metadata/rules, categories, load order,
+// deployment settings, and download bookkeeping. Deliberately excludes anything
+// admin-level — game/install/download *paths*, extensions (install/enable/remove),
+// credentials/auth, profile deletion, window/network state — even though those are
+// otherwise plain action creators the same reflection mechanism could reach. This
+// allowlist is the actual enforcement boundary, not just a documentation note.
+const DISPATCHABLE_ACTIONS = new Set([
+  "addMod",
+  "addMods",
+  "addModRule",
+  "clearModRules",
+  "removeMod",
+  "removeModRule",
+  "setModAttribute",
+  "setModAttributes",
+  "setModArchiveId",
+  "setModEnabled",
+  "setModInstallationPath",
+  "setModState",
+  "setModType",
+  "setCategory",
+  "setCategoryOrder",
+  "removeCategory",
+  "renameCategory",
+  "loadCategories",
+  "updateCategories",
+  "setFileOverride",
+  "setINITweakEnabled",
+  "setLoadOrder",
+  "setLoadOrderEntry",
+  "setFBLoadOrder",
+  "setFBLoadOrderEntry",
+  "setPendingPluginSort",
+  "clearPendingPluginSort",
+  "setActivator",
+  "setAutoDeployment",
+  "setCleanupOnDeploy",
+  "setConfirmPurge",
+  "setDeploymentNecessary",
+  "setDownloadModInfo",
+  "setDownloadHash",
+  "mergeDownloadModInfo",
+  "pauseDownload",
+  "removeDownload",
+  "removeDownloadSilent",
+  "setDownloadInstalled",
+  "setDownloadInterrupted",
+]);
+
+/**
+ * Dispatches a named, allowlisted Vortex action creator. Covers the bulk of Vortex's
+ * mod-management action surface generically (new allowlisted actions become callable
+ * without a rebuild), but is not a general escape hatch — see DISPATCHABLE_ACTIONS.
+ */
+export function dispatchAction(api: IExtensionApi, name: string, args: unknown[] = []): unknown {
+  if (!DISPATCHABLE_ACTIONS.has(name)) {
+    throw new Error(
+      `Action not allowlisted for dispatch: ${name}. This tool covers standard mod-management ` +
+        "actions only, not admin-level ones (paths, extensions, credentials, profile deletion).",
+    );
+  }
+  const fn = (actions as Record<string, unknown>)[name];
+  if (typeof fn !== "function") {
+    throw new Error(`Unknown action: ${name}.`);
+  }
+  const result = (fn as (...fnArgs: unknown[]) => unknown)(...args);
+  if (
+    result === null ||
+    typeof result !== "object" ||
+    typeof (result as { type?: unknown }).type !== "string"
+  ) {
+    throw new Error(`${name} did not return a dispatchable action object.`);
+  }
+  store(api).dispatch(result);
+  return result;
 }
 
 export function switchProfile(api: IExtensionApi, profileId: string): void {

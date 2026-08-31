@@ -60,6 +60,8 @@ even show them — when `VORTEX_MCP_TOKEN` is set (see [Safety](#safety)).
 | `list_mods`            | read   | Mods for a game with friendly names and enabled state — a join `vortex_query` can't do in one call.     |
 | `switch_profile`       | write  | Switch to a different profile by id.                                                                    |
 | `clone_profile`        | write  | Clone a profile into a new one (on-disk directory + mod state) — Vortex's own "Clone" operation.        |
+| `vortex_dispatch`      | write  | Dispatch a named, allowlisted action creator — mod/category/load-order/deployment/download actions.     |
+| `backup_state`         | write  | Write a full state snapshot to Vortex's own backup folder — reproduces Vortex's un-exported backup fn.  |
 | `set_mods_enabled`     | write  | Enable/disable a set of mods for a profile. Does not deploy.                                            |
 | `deploy_mods`          | write  | Deploy currently enabled mods for the active profile.                                                   |
 | `purge_mods`           | write  | Purge (undeploy) all deployed mod files for the active profile.                                         |
@@ -74,12 +76,24 @@ choice: fewer, richer read primitives over reflection on the live
 `@nexusmods/vortex-api` namespace, rather than a named MCP tool (and a
 rebuild) per selector. `list_mods` stays hand-written because it performs a
 real join (mod ↔ profile enabled-state, friendly name via `renderModName`)
-that reflection can't do in one call. Writes stay hand-written entirely —
-`vortex-api`'s action-creator calling conventions aren't uniform (most are
-plain Redux action creators; `setModsEnabled` is an async helper that takes
-`api` directly and must be awaited, not dispatched) — so a generic write
-dispatcher can't be built safely, and the validation in each write wrapper is
-the point, not boilerplate to genericize away.
+that reflection can't do in one call.
+
+`vortex_dispatch` extends the same reflection principle to writes, but only
+for the ~150 `actions` entries that are plain Redux action creators — call
+it, dispatch what comes back. It's gated by a hard-coded allowlist
+(`DISPATCHABLE_ACTIONS` in `vortexControl.ts`) covering standard mod/
+category/load-order/deployment/download actions, deliberately excluding
+admin-level ones (game/install/download _paths_, extensions, credentials,
+profile deletion) even though they're otherwise callable the same way — the
+allowlist is the actual enforcement boundary, not just documentation. The
+remaining hand-written write tools exist because they genuinely aren't
+`actions[name](...args)` calls: `setModsEnabled` takes `api` directly and
+must be awaited rather than dispatched; `deploy_mods`/`purge_mods`/
+`install_mod_from_url` go through `api.events.emit` with inconsistent
+callback positions per event; `clone_profile` is a filesystem copy plus a
+dispatch. None of that is reachable by name-based reflection no matter how
+uniform the simple case gets — the validation and orchestration in those
+wrappers is the point, not boilerplate to genericize away.
 
 ## Architecture
 

@@ -131,6 +131,53 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "vortex_dispatch",
+    {
+      description:
+        "Dispatch a named, allowlisted Vortex action creator — mod metadata/rules, categories, " +
+        "load order, deployment settings, download bookkeeping. Covers the bulk of Vortex's " +
+        "mod-management surface generically (new allowlisted actions become callable without a " +
+        "rebuild), but is intentionally NOT a general escape hatch: admin-level actions (game/" +
+        "install/download paths, extensions, credentials, profile deletion) are excluded even " +
+        "though they're otherwise plain action creators. Use vortex_describe's `actions` list " +
+        "for candidate names, then check Vortex's source for the exact argument order.",
+      inputSchema: z.object({
+        action: z.string().describe("Action creator name, e.g. 'setLoadOrder'"),
+        args: z
+          .array(z.unknown())
+          .optional()
+          .describe("Positional arguments for the action creator"),
+      }),
+    },
+    async ({ action, args }) => {
+      const dispatched = control.dispatchAction(api, action, args);
+      return { content: [{ type: "text", text: JSON.stringify(dispatched, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    "backup_state",
+    {
+      description:
+        "Create a full snapshot of Vortex's settings/persistent/app/user state as a JSON file " +
+        "in Vortex's own backup folder (%APPDATA%/vortex/temp/state_backups_full) — the same " +
+        "data Vortex's own manual/hourly backups capture, reproduced from the published API " +
+        "since the backup function itself isn't exported. Pure read + file write; does not " +
+        "touch Vortex's live state.",
+      inputSchema: z.object({
+        name: z
+          .string()
+          .optional()
+          .describe("Label included in the backup filename; defaults to 'mcp'"),
+      }),
+    },
+    async ({ name }) => {
+      const backupPath = await control.backupState(api, name);
+      return { content: [{ type: "text", text: `Backup written to ${backupPath}` }] };
+    },
+  );
+
+  server.registerTool(
     "set_mods_enabled",
     {
       description:

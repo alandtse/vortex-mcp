@@ -7,6 +7,8 @@ vi.mock("@nexusmods/vortex-api", () => ({
     setNextProfile: vi.fn((id: string) => ({ type: "SET_NEXT_PROFILE", payload: id })),
     setModsEnabled: vi.fn(async () => undefined),
     setProfile: vi.fn((profile: unknown) => ({ type: "SET_PROFILE", payload: profile })),
+    setLoadOrder: vi.fn((order: unknown) => ({ type: "SET_LOAD_ORDER", payload: order })),
+    setGamePath: vi.fn((gamePath: unknown) => ({ type: "SET_GAME_PATH", payload: gamePath })),
   },
   selectors: {
     activeProfileId: vi.fn<() => string | undefined>(),
@@ -18,6 +20,7 @@ vi.mock("@nexusmods/vortex-api", () => ({
   util: {
     renderModName: vi.fn((mod: { id: string }) => mod.id),
     getVortexPath: vi.fn(() => "C:\\fake\\userData"),
+    writeFileAtomic: vi.fn(async () => undefined),
     toPromise: vi.fn(
       (fn: (cb: (err: Error | null, result?: unknown) => void) => void) =>
         new Promise((resolve, reject) => {
@@ -27,17 +30,20 @@ vi.mock("@nexusmods/vortex-api", () => ({
   },
   fs: {
     ensureDirAsync: vi.fn(async () => undefined),
+    ensureDirWritableAsync: vi.fn(async () => undefined),
     copyAsync: vi.fn(async () => undefined),
   },
   log: vi.fn(),
 }));
 
-import { actions, fs, selectors } from "@nexusmods/vortex-api";
+import { actions, fs, selectors, util } from "@nexusmods/vortex-api";
 import {
   activateGame,
+  backupState,
   cloneProfile,
   deployMods,
   describeApi,
+  dispatchAction,
   installModFromUrl,
   listMods,
   purgeMods,
@@ -322,5 +328,62 @@ describe("vortexControl: restart", () => {
     (globalThis as { window?: unknown }).window = {};
 
     expect(() => restartVortex()).toThrow(/window.api.app.relaunch/);
+  });
+});
+
+describe("vortexControl: dispatchAction", () => {
+  it("dispatches an allowlisted action and returns it", () => {
+    const dispatch = vi.fn();
+
+    const result = dispatchAction(fakeApi({ dispatch }), "setLoadOrder", [["modA", "modB"]]);
+
+    expect(actions.setLoadOrder).toHaveBeenCalledWith(["modA", "modB"]);
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "SET_LOAD_ORDER",
+      payload: ["modA", "modB"],
+    });
+    expect(result).toEqual({ type: "SET_LOAD_ORDER", payload: ["modA", "modB"] });
+  });
+
+  it("rejects an admin-level action even though it's a plain action creator", () => {
+    const dispatch = vi.fn();
+
+    expect(() => dispatchAction(fakeApi({ dispatch }), "setGamePath", ["C:\\Games"])).toThrow(
+      /not allowlisted/,
+    );
+    expect(actions.setGamePath).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown action name", () => {
+    expect(() => dispatchAction(fakeApi(), "totallyMadeUp")).toThrow(/not allowlisted/);
+  });
+});
+
+describe("vortexControl: backupState", () => {
+  it("writes a snapshot of settings/persistent/app/user state to Vortex's backup folder", async () => {
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      settings: { s: 1 },
+      persistent: { p: 1 },
+      app: { a: 1 },
+      user: { u: 1 },
+      session: { secret: "never backed up" },
+    });
+
+    const backupPath = await backupState(api, "test");
+
+    expect(backupPath).toContain(path.join("temp", "state_backups_full"));
+    expect(backupPath).toContain("test-");
+    expect(fs.ensureDirWritableAsync).toHaveBeenCalled();
+    const written = vi.mocked(util.writeFileAtomic).mock.calls[0];
+    expect(written[0]).toBe(backupPath);
+    const parsed = JSON.parse(written[1] as string);
+    expect(parsed).toEqual({
+      settings: { s: 1 },
+      persistent: { p: 1 },
+      app: { a: 1 },
+      user: { u: 1 },
+    });
   });
 });

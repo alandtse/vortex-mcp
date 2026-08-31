@@ -24,6 +24,8 @@ vi.mock("./vortexControl", () => ({
   installModFromUrl: vi.fn(async () => "download-1"),
   activateGame: vi.fn(),
   restartVortex: vi.fn(),
+  dispatchAction: vi.fn(() => ({ type: "NOOP" })),
+  backupState: vi.fn(async () => "C:\\fake\\backup.json"),
 }));
 
 let startMcpServer: typeof import("./mcpServer").startMcpServer;
@@ -122,6 +124,8 @@ describe("mcpServer HTTP gating", () => {
     expect(res.body).not.toContain("install_mod_from_url");
     expect(res.body).not.toContain("switch_profile");
     expect(res.body).not.toContain("clone_profile");
+    expect(res.body).not.toContain("vortex_dispatch");
+    expect(res.body).not.toContain("backup_state");
     expect(res.body).not.toContain("vortex_restart");
   });
 });
