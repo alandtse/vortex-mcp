@@ -64,6 +64,7 @@ even show them — when `VORTEX_MCP_TOKEN` is set (see [Safety](#safety)).
 | `purge_mods`           | write  | Purge (undeploy) all deployed mod files for the active profile.                                         |
 | `install_mod_from_url` | write  | Download and install a mod from a URL (e.g. an `nxm://` link).                                          |
 | `activate_game`        | write  | Switch Vortex's active game mode.                                                                       |
+| `vortex_restart`       | write  | Restart Vortex via its own graceful relaunch (Vortex's "Restart now" path) — not a hard process kill.   |
 
 `vortex_describe`/`vortex_query` deliberately replace the old one-tool-per-
 selector design (`list_profiles`, `get_active_profile`) — an
@@ -97,6 +98,13 @@ undefined`), matching the 2026-07-28 spec's removal of sessions — there is
   has to run in the renderer process: the event listeners and Redux store
   this extension talks to are all renderer-side, so `onceMain` would produce
   a server that reads/writes nothing real.
+- `restartVortex` (in `vortexControl.ts`) is the one function that reaches
+  outside `@nexusmods/vortex-api` — it calls `window.api.app.relaunch()`,
+  Vortex's own Electron preload bridge (reachable because this extension
+  shares the renderer process), which is the exact path behind Vortex's own
+  "Restart now" button: graceful window close, then Vortex's normal shutdown
+  sequence, then relaunch. Unlike vortex-api this isn't a published contract
+  — it can change across Vortex releases without notice.
 
 ## Safety
 

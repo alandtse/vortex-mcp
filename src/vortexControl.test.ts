@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@nexusmods/vortex-api", () => ({
   actions: {
@@ -34,6 +34,7 @@ import {
   purgeMods,
   queryStatePath,
   querySelector,
+  restartVortex,
   setModsEnabled,
   switchProfile,
 } from "./vortexControl";
@@ -241,5 +242,26 @@ describe("vortexControl: games", () => {
     activateGame(fakeApi({ emit }), "skyrimse");
 
     expect(emit).toHaveBeenCalledWith("activate-game", "skyrimse");
+  });
+});
+
+describe("vortexControl: restart", () => {
+  afterEach(() => {
+    delete (globalThis as { window?: unknown }).window;
+  });
+
+  it("restartVortex calls window.api.app.relaunch", () => {
+    const relaunch = vi.fn();
+    (globalThis as { window?: unknown }).window = { api: { app: { relaunch } } };
+
+    restartVortex();
+
+    expect(relaunch).toHaveBeenCalled();
+  });
+
+  it("restartVortex throws when the preload bridge is unavailable", () => {
+    (globalThis as { window?: unknown }).window = {};
+
+    expect(() => restartVortex()).toThrow(/window.api.app.relaunch/);
   });
 });

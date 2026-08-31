@@ -175,6 +175,26 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
       return { content: [{ type: "text", text: `Activated game ${gameId}` }] };
     },
   );
+
+  server.registerTool(
+    "vortex_restart",
+    {
+      description:
+        "Restart Vortex via its own graceful relaunch (same path as Vortex's 'Restart now' " +
+        "button): closes windows and lets Vortex's normal shutdown sequence finish — " +
+        "finalizing in-progress operations, flushing its database — before actually quitting. " +
+        "Not a hard process kill. The MCP connection drops during restart and this server " +
+        "reconnects automatically once Vortex is back up.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      // Respond before relaunching so the client sees this call succeed — win.close()
+      // in Vortex's main process is asynchronous, but give the HTTP response a moment
+      // to flush before triggering it regardless.
+      setTimeout(() => control.restartVortex(), 200);
+      return { content: [{ type: "text", text: "Restarting Vortex..." }] };
+    },
+  );
 }
 
 function isTokenAuthorized(req: http.IncomingMessage): boolean {

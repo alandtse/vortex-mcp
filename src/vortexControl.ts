@@ -3,6 +3,26 @@ import { actions, selectors, util, log, types } from "@nexusmods/vortex-api";
 type IExtensionApi = types.IExtensionApi;
 type IMod = types.IMod;
 
+// Not part of @nexusmods/vortex-api — window.api is Vortex's own Electron preload
+// bridge (contextBridge), reachable because this extension shares the renderer
+// process. Unlike vortex-api this isn't a published contract Nexus Mods commits to
+// keeping stable; it can change across Vortex releases without warning.
+declare const window: { api?: { app?: { relaunch: (args?: string[]) => void } } };
+
+/**
+ * Restarts Vortex via its own graceful relaunch path (the same one behind Vortex's
+ * "Restart now" button): closes windows and lets Vortex's normal shutdown sequence
+ * (finalize in-progress operations, flush its database) run before actually quitting.
+ * Not a hard process kill.
+ */
+export function restartVortex(): void {
+  const relaunch = window.api?.app?.relaunch;
+  if (relaunch === undefined) {
+    throw new Error("window.api.app.relaunch is unavailable (unexpected Vortex preload shape)");
+  }
+  relaunch();
+}
+
 export interface ModSummary {
   id: string;
   name: string;

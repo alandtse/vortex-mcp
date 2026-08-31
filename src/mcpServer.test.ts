@@ -17,6 +17,7 @@ vi.mock("./vortexControl", () => ({
   purgeMods: vi.fn(async () => undefined),
   installModFromUrl: vi.fn(async () => "download-1"),
   activateGame: vi.fn(),
+  restartVortex: vi.fn(),
 }));
 
 let startMcpServer: typeof import("./mcpServer").startMcpServer;
@@ -114,5 +115,6 @@ describe("mcpServer HTTP gating", () => {
     expect(res.body).not.toContain("purge_mods");
     expect(res.body).not.toContain("install_mod_from_url");
     expect(res.body).not.toContain("switch_profile");
+    expect(res.body).not.toContain("vortex_restart");
   });
 });
