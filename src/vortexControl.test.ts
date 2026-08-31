@@ -570,6 +570,30 @@ describe("vortexControl: listDownloads", () => {
 
     expect(() => listDownloads(fakeApi())).toThrow(/No active game/);
   });
+
+  it("treats a missing `received` as 0 progress instead of NaN (seen live on some entries)", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        downloads: {
+          files: {
+            d1: {
+              id: "d1",
+              game: ["skyrimse"],
+              state: "finished",
+              size: 200,
+              localPath: "mod1.zip",
+            },
+          },
+        },
+      },
+    });
+
+    expect(listDownloads(api)).toEqual([
+      { id: "d1", name: "mod1.zip", state: "finished", progress: 0, size: 200 },
+    ]);
+  });
 });
 
 describe("vortexControl: listNotifications", () => {

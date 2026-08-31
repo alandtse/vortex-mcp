@@ -162,4 +162,28 @@ describe("mcpServer HTTP gating", () => {
       ]),
     );
   });
+
+  it("returns a clean null (not a transport error) when a vortex_query path resolves to undefined", async () => {
+    // querySelector/queryStatePath are mocked to return undefined above (an unresolved
+    // selector/path is a legitimate result, found live) — JSON.stringify(undefined) used
+    // to return the actual `undefined` value instead of a string, which failed the MCP
+    // SDK's own response-schema validation (content[].text must be string) and surfaced
+    // as a JSON-RPC error instead of a normal tool result. Regression test for that.
+    const res = await request({
+      headers: jsonHeaders,
+      body: {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "vortex_query", arguments: { path: ["nonexistent", "path"] } },
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).not.toContain('"error"');
+    const dataLine = res.body.split("\n").find((line) => line.startsWith("data: "));
+    const parsed = JSON.parse(dataLine?.slice("data: ".length) ?? "{}") as {
+      result?: { content?: Array<{ type: string; text: string }> };
+    };
+    expect(parsed.result?.content?.[0]?.text).toBe("null");
+  });
 });
