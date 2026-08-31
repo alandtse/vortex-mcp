@@ -7,33 +7,50 @@ vi.mock("@nexusmods/vortex-api", () => ({
 }));
 
 vi.mock("./vortexControl", () => ({
-  listProfiles: vi.fn(() => []),
+  describeApi: vi.fn(() => ({ selectors: [], actions: [], stateKeys: [] })),
+  querySelector: vi.fn(() => undefined),
+  queryStatePath: vi.fn(() => undefined),
+  switchProfile: vi.fn(),
+  listMods: vi.fn(() => []),
+  setModsEnabled: vi.fn(async () => undefined),
+  deployMods: vi.fn(async () => undefined),
+  purgeMods: vi.fn(async () => undefined),
+  installModFromUrl: vi.fn(async () => "download-1"),
+  activateGame: vi.fn(),
 }));
 
 let port: number;
 let server: http.Server;
 
-function request(headers: http.OutgoingHttpHeaders): Promise<{ status: number }> {
+function request(
+  headers: http.OutgoingHttpHeaders,
+  body?: unknown,
+): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const req = http.request(
       { host: "127.0.0.1", port, path: "/mcp", method: "POST", headers },
       (res) => {
-        res.resume();
-        res.on("end", () => resolve({ status: res.statusCode ?? 0 }));
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () =>
+          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }),
+        );
       },
     );
     req.on("error", reject);
     req.write(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: {
-          protocolVersion: "2026-07-28",
-          capabilities: {},
-          clientInfo: { name: "t", version: "0" },
+      JSON.stringify(
+        body ?? {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2026-07-28",
+            capabilities: {},
+            clientInfo: { name: "t", version: "0" },
+          },
         },
-      }),
+      ),
     );
     req.end();
   });
@@ -72,5 +89,21 @@ describe("mcpServer bearer token gating", () => {
   it("accepts a request with the correct bearer token", async () => {
     const res = await request({ ...jsonHeaders, authorization: "Bearer test-secret" });
     expect(res.status).toBe(200);
+  });
+
+  it("registers write tools once a token is configured", async () => {
+    const res = await request(
+      { ...jsonHeaders, authorization: "Bearer test-secret" },
+      {
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/list",
+        params: {},
+      },
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toContain("purge_mods");
+    expect(res.body).toContain("switch_profile");
+    expect(res.body).toContain("install_mod_from_url");
   });
 });

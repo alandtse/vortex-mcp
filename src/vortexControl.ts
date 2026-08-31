@@ -1,7 +1,6 @@
 import { actions, selectors, util, log, types } from "@nexusmods/vortex-api";
 
 type IExtensionApi = types.IExtensionApi;
-type IProfile = types.IProfile;
 type IMod = types.IMod;
 
 export interface ModSummary {
@@ -10,13 +9,6 @@ export interface ModSummary {
   type: string;
   version?: string;
   enabled: boolean;
-}
-
-export interface ProfileSummary {
-  id: string;
-  name: string;
-  gameId: string;
-  active: boolean;
 }
 
 function state(api: IExtensionApi): types.IState {
@@ -33,24 +25,41 @@ function store(api: IExtensionApi) {
   return api.store;
 }
 
-export function listProfiles(api: IExtensionApi): ProfileSummary[] {
-  const st = state(api);
-  const activeId = selectors.activeProfileId(st);
-  return Object.values(selectors.profiles(st)).map((profile: IProfile) => ({
-    id: profile.id,
-    name: profile.name,
-    gameId: profile.gameId,
-    active: profile.id === activeId,
-  }));
+export interface ApiDescription {
+  /** Names callable via query({ selector, args }) — each is (state, ...args) => value. */
+  selectors: string[];
+  /** Names of Vortex's dispatchable action creators (informational; not directly callable — see query). */
+  actions: string[];
+  /** Top-level keys of the Redux state tree, walkable via query({ path }). */
+  stateKeys: string[];
 }
 
-export function getActiveProfile(api: IExtensionApi): ProfileSummary | undefined {
+export function describeApi(api: IExtensionApi): ApiDescription {
   const st = state(api);
-  const profile = selectors.activeProfile(st);
-  if (!profile) {
-    return undefined;
+  return {
+    selectors: Object.keys(selectors).toSorted(),
+    actions: Object.keys(actions).toSorted(),
+    stateKeys: Object.keys(st as object).toSorted(),
+  };
+}
+
+export function querySelector(api: IExtensionApi, name: string, args: unknown[] = []): unknown {
+  const fn = (selectors as Record<string, unknown>)[name];
+  if (typeof fn !== "function") {
+    throw new Error(`Unknown selector: ${name}. Call describeApi() for the available list.`);
   }
-  return { id: profile.id, name: profile.name, gameId: profile.gameId, active: true };
+  return (fn as (...fnArgs: unknown[]) => unknown)(state(api), ...args);
+}
+
+export function queryStatePath(api: IExtensionApi, path: string[]): unknown {
+  let value: unknown = state(api);
+  for (const key of path) {
+    if (value === null || typeof value !== "object") {
+      return undefined;
+    }
+    value = (value as Record<string, unknown>)[key];
+  }
+  return value;
 }
 
 export function switchProfile(api: IExtensionApi, profileId: string): void {

@@ -28,11 +28,12 @@ import { actions, selectors } from "@nexusmods/vortex-api";
 import {
   activateGame,
   deployMods,
-  getActiveProfile,
+  describeApi,
   installModFromUrl,
   listMods,
-  listProfiles,
   purgeMods,
+  queryStatePath,
+  querySelector,
   setModsEnabled,
   switchProfile,
 } from "./vortexControl";
@@ -53,45 +54,48 @@ function fakeApi(
   } as never;
 }
 
+describe("vortexControl: reflection", () => {
+  it("describeApi lists the live selector/action/state-key names", () => {
+    vi.mocked(selectors.activeProfileId).mockReturnValue("p1");
+
+    const result = describeApi(fakeApi());
+
+    expect(result.selectors).toContain("activeProfileId");
+    expect(result.selectors).toContain("profiles");
+    expect(result.actions).toContain("setNextProfile");
+    expect(result.stateKeys).toEqual([]);
+  });
+
+  it("querySelector calls the named selector with state and extra args", () => {
+    vi.mocked(selectors.profiles).mockReturnValue({ p1: { id: "p1" } as never });
+
+    expect(querySelector(fakeApi(), "profiles")).toEqual({ p1: { id: "p1" } });
+  });
+
+  it("querySelector throws for an unknown selector name", () => {
+    expect(() => querySelector(fakeApi(), "notARealSelector")).toThrow(/Unknown selector/);
+  });
+
+  it("queryStatePath walks the state tree by key", () => {
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: { mods: { skyrimse: { modA: { id: "modA" } } } },
+    });
+
+    expect(queryStatePath(api, ["persistent", "mods", "skyrimse", "modA"])).toEqual({
+      id: "modA",
+    });
+  });
+
+  it("queryStatePath returns undefined for a path that doesn't resolve", () => {
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({});
+
+    expect(queryStatePath(api, ["nope", "deeper"])).toBeUndefined();
+  });
+});
+
 describe("vortexControl: profiles", () => {
-  it("listProfiles maps state into summaries, marking the active one", () => {
-    vi.mocked(selectors.activeProfileId).mockReturnValue("p2");
-    vi.mocked(selectors.profiles).mockReturnValue({
-      p1: { id: "p1", name: "First", gameId: "skyrimse", modState: {}, lastActivated: 0 },
-      p2: { id: "p2", name: "Second", gameId: "skyrimse", modState: {}, lastActivated: 1 },
-    });
-
-    const result = listProfiles(fakeApi());
-
-    expect(result).toEqual([
-      { id: "p1", name: "First", gameId: "skyrimse", active: false },
-      { id: "p2", name: "Second", gameId: "skyrimse", active: true },
-    ]);
-  });
-
-  it("getActiveProfile returns undefined when there is no active profile", () => {
-    vi.mocked(selectors.activeProfile).mockReturnValue(undefined);
-
-    expect(getActiveProfile(fakeApi())).toBeUndefined();
-  });
-
-  it("getActiveProfile returns the active profile summary", () => {
-    vi.mocked(selectors.activeProfile).mockReturnValue({
-      id: "p1",
-      name: "First",
-      gameId: "skyrimse",
-      modState: {},
-      lastActivated: 0,
-    });
-
-    expect(getActiveProfile(fakeApi())).toEqual({
-      id: "p1",
-      name: "First",
-      gameId: "skyrimse",
-      active: true,
-    });
-  });
-
   it("switchProfile rejects unknown profile ids without dispatching", () => {
     vi.mocked(selectors.profiles).mockReturnValue({});
     const dispatch = vi.fn();

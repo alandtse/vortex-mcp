@@ -16,47 +16,62 @@ type IExtensionApi = types.IExtensionApi;
 
 const PORT = Number(process.env.VORTEX_MCP_PORT ?? 3701);
 const HOST = "127.0.0.1";
-// Optional bearer token: set VORTEX_MCP_TOKEN to require `Authorization: Bearer <token>`
-// on every request, in addition to the Host/Origin checks below (which are what
-// actually stop DNS-rebinding — a page whose hostname resolves to 127.0.0.1).
+// Set VORTEX_MCP_TOKEN to require `Authorization: Bearer <token>` on every request AND to
+// unlock the write tools (see startMcpServer) — with no token, only read tools are ever
+// registered. Host/Origin checks below are what actually stop DNS-rebinding (a page whose
+// hostname resolves to 127.0.0.1); the token is a second, independent gate for writes.
 const TOKEN = process.env.VORTEX_MCP_TOKEN;
 
-function registerTools(server: McpServer, api: IExtensionApi): void {
+function registerReadTools(server: McpServer, api: IExtensionApi): void {
   server.registerTool(
-    "list_profiles",
+    "vortex_describe",
     {
-      description: "List all Vortex profiles, marking which one is active.",
+      description:
+        "Discover the live Vortex API surface: callable selector names (for vortex_query), " +
+        "Vortex's action-creator names (informational), and top-level Redux state keys (for " +
+        "vortex_query's path mode). Reflects whatever vortex-api version is actually running — " +
+        "new selectors/state show up here without an extension rebuild.",
       inputSchema: z.object({}),
     },
     async () => ({
-      content: [{ type: "text", text: JSON.stringify(control.listProfiles(api), null, 2) }],
+      content: [{ type: "text", text: JSON.stringify(control.describeApi(api), null, 2) }],
     }),
   );
 
   server.registerTool(
-    "get_active_profile",
+    "vortex_query",
     {
-      description: "Get the currently active Vortex profile.",
-      inputSchema: z.object({}),
-    },
-    async () => ({
-      content: [
-        { type: "text", text: JSON.stringify(control.getActiveProfile(api) ?? null, null, 2) },
-      ],
-    }),
-  );
-
-  server.registerTool(
-    "switch_profile",
-    {
-      description: "Switch Vortex to a different profile by id.",
+      description:
+        "Read Vortex state. Two modes: `selector` calls that named vortex-api selector as " +
+        "`(state, ...args)` (e.g. selector='activeProfileId', or selector='profiles' then " +
+        "cross-reference the id yourself); `path` walks the Redux state tree by key " +
+        "(e.g. path=['persistent','mods','skyrimse']). Use vortex_describe first to see what's " +
+        "available. Read-only; use list_mods for a ready-formatted mod list.",
       inputSchema: z.object({
-        profileId: z.string().describe("Target profile id, from list_profiles"),
+        selector: z.string().optional(),
+        args: z.array(z.unknown()).optional(),
+        path: z.array(z.string()).optional(),
       }),
     },
-    async ({ profileId }) => {
-      control.switchProfile(api, profileId);
-      return { content: [{ type: "text", text: `Switched to profile ${profileId}` }] };
+    async ({ selector, args, path }) => {
+      if (selector !== undefined) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(control.querySelector(api, selector, args), null, 2),
+            },
+          ],
+        };
+      }
+      if (path !== undefined) {
+        return {
+          content: [
+            { type: "text", text: JSON.stringify(control.queryStatePath(api, path), null, 2) },
+          ],
+        };
+      }
+      throw new Error("Provide either `selector` or `path`.");
     },
   );
 
@@ -64,7 +79,8 @@ function registerTools(server: McpServer, api: IExtensionApi): void {
     "list_mods",
     {
       description:
-        "List mods for a game (defaults to the active game), with enabled state for the active profile.",
+        "List mods for a game (defaults to the active game), with friendly names and enabled " +
+        "state for the active profile — a formatted join vortex_query can't do in one call.",
       inputSchema: z.object({
         gameId: z.string().optional().describe("Game id; defaults to the active game"),
       }),
@@ -72,6 +88,22 @@ function registerTools(server: McpServer, api: IExtensionApi): void {
     async ({ gameId }) => ({
       content: [{ type: "text", text: JSON.stringify(control.listMods(api, gameId), null, 2) }],
     }),
+  );
+}
+
+function registerWriteTools(server: McpServer, api: IExtensionApi): void {
+  server.registerTool(
+    "switch_profile",
+    {
+      description: "Switch Vortex to a different profile by id.",
+      inputSchema: z.object({
+        profileId: z.string().describe("Target profile id (query selector='profiles' to list)"),
+      }),
+    },
+    async ({ profileId }) => {
+      control.switchProfile(api, profileId);
+      return { content: [{ type: "text", text: `Switched to profile ${profileId}` }] };
+    },
   );
 
   server.registerTool(
@@ -154,7 +186,15 @@ function isTokenAuthorized(req: http.IncomingMessage): boolean {
 
 export function startMcpServer(api: IExtensionApi): http.Server {
   const server = new McpServer({ name: "vortex-mcp", version: "0.1.0" });
-  registerTools(server, api);
+  registerReadTools(server, api);
+  // Fail closed: writes (profile switch, mod enable/disable, deploy, purge, install,
+  // game activation) are only ever registered — let alone reachable — when an operator
+  // has explicitly opted in by setting a token. No token means no write tool exists to call.
+  if (TOKEN !== undefined) {
+    registerWriteTools(server, api);
+  } else {
+    log("warn", "[vortex-mcp] VORTEX_MCP_TOKEN not set — write tools disabled, read-only mode");
+  }
 
   const validateHost = localhostHostValidation();
   const validateOrigin = localhostOriginValidation();

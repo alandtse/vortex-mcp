@@ -7,8 +7,9 @@ vi.mock("@nexusmods/vortex-api", () => ({
 }));
 
 vi.mock("./vortexControl", () => ({
-  listProfiles: vi.fn(() => []),
-  getActiveProfile: vi.fn(() => undefined),
+  describeApi: vi.fn(() => ({ selectors: [], actions: [], stateKeys: [] })),
+  querySelector: vi.fn(() => undefined),
+  queryStatePath: vi.fn(() => undefined),
   switchProfile: vi.fn(),
   listMods: vi.fn(() => []),
   setModsEnabled: vi.fn(async () => undefined),
@@ -99,5 +100,19 @@ describe("mcpServer HTTP gating", () => {
     const res = await request({ headers: jsonHeaders, body: initializeBody });
     expect(res.status).toBe(200);
     expect(res.body).toContain('"protocolVersion"');
+  });
+
+  it("only registers read tools when VORTEX_MCP_TOKEN is unset (fail closed)", async () => {
+    const res = await request({
+      headers: jsonHeaders,
+      body: { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toContain("vortex_query");
+    expect(res.body).toContain("vortex_describe");
+    expect(res.body).toContain("list_mods");
+    expect(res.body).not.toContain("purge_mods");
+    expect(res.body).not.toContain("install_mod_from_url");
+    expect(res.body).not.toContain("switch_profile");
   });
 });
