@@ -221,7 +221,7 @@ export function dispatchAction(api: IExtensionApi, name: string, args: unknown[]
   ) {
     throw new Error(`${name} did not return a dispatchable action object.`);
   }
-  store(api).dispatch(result);
+  store(api).dispatch(result as { type: string });
   return result;
 }
 
@@ -407,15 +407,15 @@ export async function setModsEnabled(
   await actions.setModsEnabled(api, targetProfileId, modIds, enabled);
 }
 
-export function deployMods(api: IExtensionApi): Promise<void> {
-  return util.toPromise<void>((cb) => api.events.emit("deploy-mods", cb));
+export async function deployMods(api: IExtensionApi): Promise<void> {
+  await util.toPromise<void>((cb) => api.events.emit("deploy-mods", cb));
 }
 
-export function purgeMods(api: IExtensionApi, allowFallback = false): Promise<void> {
-  return util.toPromise<void>((cb) => api.events.emit("purge-mods", allowFallback, cb));
+export async function purgeMods(api: IExtensionApi, allowFallback = false): Promise<void> {
+  await util.toPromise<void>((cb) => api.events.emit("purge-mods", allowFallback, cb));
 }
 
-export function installModFromUrl(api: IExtensionApi, url: string): Promise<string> {
+export async function installModFromUrl(api: IExtensionApi, url: string): Promise<string> {
   return util.toPromise<string>((cb) =>
     api.events.emit("start-download", [url], {}, undefined, cb),
   );
