@@ -107,6 +107,30 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "clone_profile",
+    {
+      description:
+        "Clone an existing profile into a new one (copies its on-disk profile directory " +
+        "— load order, ini tweaks — plus its mod enabled-state), the same operation as " +
+        "Vortex's own 'Clone' button. Only ever reads the source profile; never modifies it " +
+        "or switches the active profile.",
+      inputSchema: z.object({
+        sourceProfileId: z
+          .string()
+          .describe("Profile id to clone (query selector='profiles' to list)"),
+        name: z
+          .string()
+          .optional()
+          .describe("Name for the new profile; defaults to '<source> (clone)'"),
+      }),
+    },
+    async ({ sourceProfileId, name }) => {
+      const cloned = await control.cloneProfile(api, sourceProfileId, name);
+      return { content: [{ type: "text", text: JSON.stringify(cloned, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
     "set_mods_enabled",
     {
       description:

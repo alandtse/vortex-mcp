@@ -11,6 +11,12 @@ vi.mock("./vortexControl", () => ({
   querySelector: vi.fn(() => undefined),
   queryStatePath: vi.fn(() => undefined),
   switchProfile: vi.fn(),
+  cloneProfile: vi.fn(async () => ({
+    id: "new-id",
+    name: "clone",
+    gameId: "skyrimse",
+    active: false,
+  })),
   listMods: vi.fn(() => []),
   setModsEnabled: vi.fn(async () => undefined),
   deployMods: vi.fn(async () => undefined),
@@ -115,6 +121,7 @@ describe("mcpServer HTTP gating", () => {
     expect(res.body).not.toContain("purge_mods");
     expect(res.body).not.toContain("install_mod_from_url");
     expect(res.body).not.toContain("switch_profile");
+    expect(res.body).not.toContain("clone_profile");
     expect(res.body).not.toContain("vortex_restart");
   });
 });

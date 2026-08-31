@@ -1,7 +1,11 @@
-import { actions, selectors, util, log, types } from "@nexusmods/vortex-api";
+import path from "node:path";
+import crypto from "node:crypto";
+
+import { actions, selectors, util, fs, log, types } from "@nexusmods/vortex-api";
 
 type IExtensionApi = types.IExtensionApi;
 type IMod = types.IMod;
+type IProfile = types.IProfile;
 
 // Not part of @nexusmods/vortex-api — window.api is Vortex's own Electron preload
 // bridge (contextBridge), reachable because this extension shares the renderer
@@ -71,9 +75,9 @@ export function querySelector(api: IExtensionApi, name: string, args: unknown[] 
   return (fn as (...fnArgs: unknown[]) => unknown)(state(api), ...args);
 }
 
-export function queryStatePath(api: IExtensionApi, path: string[]): unknown {
+export function queryStatePath(api: IExtensionApi, statePath: string[]): unknown {
   let value: unknown = state(api);
-  for (const key of path) {
+  for (const key of statePath) {
     if (value === null || typeof value !== "object") {
       return undefined;
     }
@@ -88,6 +92,54 @@ export function switchProfile(api: IExtensionApi, profileId: string): void {
     throw new Error(`Unknown profile: ${profileId}`);
   }
   store(api).dispatch(actions.setNextProfile(profileId));
+}
+
+export interface ProfileSummary {
+  id: string;
+  name: string;
+  gameId: string;
+  active: boolean;
+}
+
+// Mirrors profile_management/util/manage.ts's profilePath — not exported from
+// @nexusmods/vortex-api, so reconstructed from the (exported) getVortexPath helper.
+function profilePath(profile: IProfile): string {
+  return path.join(util.getVortexPath("userData"), profile.gameId, "profiles", profile.id);
+}
+
+/**
+ * Clones an existing profile: copies its on-disk profile directory (load order,
+ * ini tweaks, etc.) to a new profile id, then registers the new profile — the
+ * same two steps Vortex's own "Clone" button performs (ProfileView.tsx's
+ * onCloneProfile). The source profile is only ever read, never modified.
+ */
+export async function cloneProfile(
+  api: IExtensionApi,
+  sourceProfileId: string,
+  name?: string,
+): Promise<ProfileSummary> {
+  const st = state(api);
+  const source = selectors.profiles(st)[sourceProfileId];
+  if (source === undefined) {
+    throw new Error(`Unknown profile: ${sourceProfileId}`);
+  }
+
+  const newProfile: IProfile = {
+    ...source,
+    id: crypto.randomBytes(6).toString("base64url"),
+    name: name ?? `${source.name} (clone)`,
+  };
+
+  await fs.ensureDirAsync(profilePath(source));
+  await fs.copyAsync(profilePath(source), profilePath(newProfile));
+  store(api).dispatch(actions.setProfile(newProfile));
+
+  return {
+    id: newProfile.id,
+    name: newProfile.name,
+    gameId: newProfile.gameId,
+    active: false,
+  };
 }
 
 export function listMods(api: IExtensionApi, gameId?: string): ModSummary[] {

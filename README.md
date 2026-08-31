@@ -59,6 +59,7 @@ even show them — when `VORTEX_MCP_TOKEN` is set (see [Safety](#safety)).
 | `vortex_query`         | read   | Call a named selector, or walk the Redux state tree by path. General-purpose read.                      |
 | `list_mods`            | read   | Mods for a game with friendly names and enabled state — a join `vortex_query` can't do in one call.     |
 | `switch_profile`       | write  | Switch to a different profile by id.                                                                    |
+| `clone_profile`        | write  | Clone a profile into a new one (on-disk directory + mod state) — Vortex's own "Clone" operation.        |
 | `set_mods_enabled`     | write  | Enable/disable a set of mods for a profile. Does not deploy.                                            |
 | `deploy_mods`          | write  | Deploy currently enabled mods for the active profile.                                                   |
 | `purge_mods`           | write  | Purge (undeploy) all deployed mod files for the active profile.                                         |

@@ -1,9 +1,12 @@
+import path from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@nexusmods/vortex-api", () => ({
   actions: {
     setNextProfile: vi.fn((id: string) => ({ type: "SET_NEXT_PROFILE", payload: id })),
     setModsEnabled: vi.fn(async () => undefined),
+    setProfile: vi.fn((profile: unknown) => ({ type: "SET_PROFILE", payload: profile })),
   },
   selectors: {
     activeProfileId: vi.fn<() => string | undefined>(),
@@ -14,6 +17,7 @@ vi.mock("@nexusmods/vortex-api", () => ({
   },
   util: {
     renderModName: vi.fn((mod: { id: string }) => mod.id),
+    getVortexPath: vi.fn(() => "C:\\fake\\userData"),
     toPromise: vi.fn(
       (fn: (cb: (err: Error | null, result?: unknown) => void) => void) =>
         new Promise((resolve, reject) => {
@@ -21,12 +25,17 @@ vi.mock("@nexusmods/vortex-api", () => ({
         }),
     ),
   },
+  fs: {
+    ensureDirAsync: vi.fn(async () => undefined),
+    copyAsync: vi.fn(async () => undefined),
+  },
   log: vi.fn(),
 }));
 
-import { actions, selectors } from "@nexusmods/vortex-api";
+import { actions, fs, selectors } from "@nexusmods/vortex-api";
 import {
   activateGame,
+  cloneProfile,
   deployMods,
   describeApi,
   installModFromUrl,
@@ -115,6 +124,56 @@ describe("vortexControl: profiles", () => {
 
     expect(actions.setNextProfile).toHaveBeenCalledWith("p1");
     expect(dispatch).toHaveBeenCalled();
+  });
+
+  it("cloneProfile rejects an unknown source profile without touching disk", async () => {
+    vi.mocked(selectors.profiles).mockReturnValue({});
+
+    await expect(cloneProfile(fakeApi(), "missing")).rejects.toThrow(/Unknown profile/);
+    expect(fs.copyAsync).not.toHaveBeenCalled();
+  });
+
+  it("cloneProfile copies the source profile dir and dispatches setProfile with a new id", async () => {
+    const source = {
+      id: "p1",
+      name: "AE 1.7",
+      gameId: "skyrimse",
+      modState: { modA: { enabled: true, enabledTime: 0 } },
+      lastActivated: 0,
+    };
+    vi.mocked(selectors.profiles).mockReturnValue({ p1: source });
+    const dispatch = vi.fn();
+
+    const result = await cloneProfile(fakeApi({ dispatch }), "p1");
+
+    expect(result.id).not.toBe("p1");
+    expect(result.name).toBe("AE 1.7 (clone)");
+    expect(result.gameId).toBe("skyrimse");
+    expect(result.active).toBe(false);
+    expect(fs.copyAsync).toHaveBeenCalledWith(
+      expect.stringContaining(path.join("skyrimse", "profiles", "p1")),
+      expect.stringContaining(path.join("skyrimse", "profiles", result.id)),
+    );
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "SET_PROFILE",
+        payload: expect.objectContaining({
+          id: result.id,
+          name: "AE 1.7 (clone)",
+          modState: source.modState,
+        }),
+      }),
+    );
+  });
+
+  it("cloneProfile accepts an explicit name", async () => {
+    vi.mocked(selectors.profiles).mockReturnValue({
+      p1: { id: "p1", name: "AE 1.7", gameId: "skyrimse", modState: {}, lastActivated: 0 },
+    });
+
+    const result = await cloneProfile(fakeApi(), "p1", "MCP test");
+
+    expect(result.name).toBe("MCP test");
   });
 });
 
