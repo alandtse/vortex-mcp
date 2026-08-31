@@ -45,6 +45,7 @@ import {
   describeApi,
   dispatchAction,
   installModFromUrl,
+  listLoadOrder,
   listMods,
   purgeMods,
   queryStatePath,
@@ -241,6 +242,32 @@ describe("vortexControl: mods", () => {
     vi.mocked(selectors.activeProfileId).mockReturnValue(undefined);
 
     await expect(setModsEnabled(fakeApi(), ["modA"], true)).rejects.toThrow(/No active profile/);
+  });
+});
+
+describe("vortexControl: listLoadOrder", () => {
+  it("sorts plugins by index and defaults enabled to true when absent", () => {
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      loadOrder: {
+        "update.esm": { loadOrder: 1 },
+        "skyrim.esm": { loadOrder: 0 },
+        "mymod.esp": { loadOrder: 2, enabled: false },
+      },
+    });
+
+    expect(listLoadOrder(api)).toEqual([
+      { plugin: "skyrim.esm", index: 0, enabled: true },
+      { plugin: "update.esm", index: 1, enabled: true },
+      { plugin: "mymod.esp", index: 2, enabled: false },
+    ]);
+  });
+
+  it("throws when there is no load order data", () => {
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({});
+
+    expect(() => listLoadOrder(api)).toThrow(/No plugin load order/);
   });
 });
 

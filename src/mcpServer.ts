@@ -89,6 +89,20 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
       content: [{ type: "text", text: JSON.stringify(control.listMods(api, gameId), null, 2) }],
     }),
   );
+
+  server.registerTool(
+    "list_load_order",
+    {
+      description:
+        "List the current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index. " +
+        "Only available for games using plugin-based load ordering (e.g. Skyrim, Fallout) — " +
+        "throws for games that don't have one active.",
+      inputSchema: z.object({}),
+    },
+    async () => ({
+      content: [{ type: "text", text: JSON.stringify(control.listLoadOrder(api), null, 2) }],
+    }),
+  );
 }
 
 function registerWriteTools(server: McpServer, api: IExtensionApi): void {

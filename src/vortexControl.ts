@@ -270,6 +270,34 @@ export function listMods(api: IExtensionApi, gameId?: string): ModSummary[] {
   }));
 }
 
+export interface LoadOrderEntry {
+  plugin: string;
+  index: number;
+  enabled: boolean;
+}
+
+/**
+ * Reads the current Gamebryo/LOOT plugin load order from state.loadOrder — a top-level
+ * key added at runtime by the gamebryo-plugin-management extension, not present in
+ * @nexusmods/vortex-api's published IState (discovered live via vortex_describe, not
+ * from the type declarations). Games using file_based_loadorder instead (no .esp/.esm
+ * plugins) won't have this key; this throws rather than silently returning nothing.
+ */
+export function listLoadOrder(api: IExtensionApi): LoadOrderEntry[] {
+  const raw = queryStatePath(api, ["loadOrder"]) as
+    | Record<string, { loadOrder: number; enabled?: boolean }>
+    | undefined;
+  if (raw === undefined || Object.keys(raw).length === 0) {
+    throw new Error(
+      "No plugin load order available (state.loadOrder is empty or missing) — this game may " +
+        "use a different load-order system (e.g. file_based_loadorder), or none is active.",
+    );
+  }
+  return Object.entries(raw)
+    .map(([plugin, entry]) => ({ plugin, index: entry.loadOrder, enabled: entry.enabled ?? true }))
+    .toSorted((a, b) => a.index - b.index);
+}
+
 export async function setModsEnabled(
   api: IExtensionApi,
   modIds: string[],

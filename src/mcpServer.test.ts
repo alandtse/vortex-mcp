@@ -18,6 +18,7 @@ vi.mock("./vortexControl", () => ({
     active: false,
   })),
   listMods: vi.fn(() => []),
+  listLoadOrder: vi.fn(() => []),
   setModsEnabled: vi.fn(async () => undefined),
   deployMods: vi.fn(async () => undefined),
   purgeMods: vi.fn(async () => undefined),
@@ -120,6 +121,7 @@ describe("mcpServer HTTP gating", () => {
     expect(res.body).toContain("vortex_query");
     expect(res.body).toContain("vortex_describe");
     expect(res.body).toContain("list_mods");
+    expect(res.body).toContain("list_load_order");
     expect(res.body).not.toContain("purge_mods");
     expect(res.body).not.toContain("install_mod_from_url");
     expect(res.body).not.toContain("switch_profile");
