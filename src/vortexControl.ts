@@ -102,10 +102,29 @@ export interface ApiDescription {
    * admin-level actions. A specific one becomes a dedicated tool if it's actually needed.
    */
   extensionApis: string[];
+  /**
+   * Direct method names on the live IExtensionApi instance (api.foo(...)) — distinct
+   * from selectors/actions/extensionApis. This is how a real capability gap got found:
+   * runExecutable (launching a game/tool) is one of these, not a Redux action or an
+   * api.ext export, so nothing in the other three lists would ever surface it.
+   * Informational only, same reasoning as extensionApis — arbitrary signatures/side
+   * effects, no uniform generic caller. A specific one becomes a dedicated tool
+   * (see launch_game) once it's confirmed live, not guessed from the type declaration.
+   */
+  apiMethods: string[];
+  /**
+   * Event names api.events.emit(name, ...args) can trigger, discovered from
+   * currently-registered listeners (api.events.eventNames()) rather than hardcoded —
+   * the same underlying mechanism deploy_mods/purge_mods/install_mod_from_url already
+   * use (deploy-mods/purge-mods/start-download), just made naturally discoverable
+   * instead of requiring a source read to find the next one.
+   */
+  eventNames: string[];
 }
 
 export function describeApi(api: IExtensionApi): ApiDescription {
   const st = state(api);
+  const apiRecord = api as unknown as Record<string, unknown>;
   return {
     selectors: Object.keys(selectors).toSorted(),
     actions: Object.keys(actions).toSorted(),
@@ -113,6 +132,13 @@ export function describeApi(api: IExtensionApi): ApiDescription {
     dispatchHints: Object.fromEntries(DISPATCHABLE_ACTIONS),
     stateKeys: Object.keys(st as object).toSorted(),
     extensionApis: Object.keys(api.ext ?? {}).toSorted(),
+    apiMethods: Object.keys(apiRecord)
+      .filter((key) => typeof apiRecord[key] === "function")
+      .toSorted(),
+    eventNames: api.events
+      .eventNames()
+      .filter((name): name is string => typeof name === "string")
+      .toSorted(),
   };
 }
 
@@ -477,6 +503,63 @@ export function activateGame(api: IExtensionApi, gameId: string): void {
   }
   api.events.emit("activate-game", gameId);
   log("info", "[vortex-mcp] activated game", { gameId });
+}
+
+interface DiscoveredTool {
+  path: string;
+  parameters?: string[];
+  workingDirectory?: string;
+  shell?: boolean;
+  detach?: boolean;
+}
+
+/**
+ * Launches a game's configured primary tool (e.g. SKSE for Skyrim, or the vanilla exe
+ * if no script extender is set) via api.runExecutable — the one genuinely missing piece
+ * of standard Vortex usage this server didn't cover, because runExecutable is a direct
+ * IExtensionApi method (found via vortex_describe's apiMethods, not a Redux action or an
+ * emitted event — nothing else in the reflected surface would have shown it).
+ *
+ * The primary-tool resolution (settings.interface.primaryTool[gameId] ->
+ * settings.gameMode.discovered[gameId].tools[toolId]) was found the same way this
+ * project always resolves an undocumented state shape: by reading real live state,
+ * not guessing from types — there's no selector that does this lookup for us.
+ * suggestDeploy: true mirrors Vortex's own "Play" button, which is what actually
+ * surfaces the "files changed outside Vortex" prompt list_dialogs/closeDialog exist for.
+ */
+export async function launchGame(api: IExtensionApi, gameId?: string): Promise<void> {
+  const st = state(api);
+  const targetGameId = gameId ?? selectors.activeGameId(st);
+  if (!targetGameId) {
+    throw new Error("No active game and no gameId provided");
+  }
+  const toolId = queryStatePath(api, ["settings", "interface", "primaryTool", targetGameId]) as
+    | string
+    | undefined;
+  if (toolId === undefined) {
+    throw new Error(
+      `No primary tool configured for ${targetGameId} (settings.interface.primaryTool). ` +
+        "Set one in Vortex's Tools page first.",
+    );
+  }
+  const tool = queryStatePath(api, [
+    "settings",
+    "gameMode",
+    "discovered",
+    targetGameId,
+    "tools",
+    toolId,
+  ]) as DiscoveredTool | undefined;
+  if (tool === undefined) {
+    throw new Error(`Primary tool '${toolId}' for ${targetGameId} is not in discovered tools.`);
+  }
+  await api.runExecutable(tool.path, tool.parameters ?? [], {
+    cwd: tool.workingDirectory,
+    shell: tool.shell ?? false,
+    detach: tool.detach ?? true,
+    suggestDeploy: true,
+  });
+  log("info", "[vortex-mcp] launched game", { gameId: targetGameId, toolId, path: tool.path });
 }
 
 export interface DownloadSummary {

@@ -36,6 +36,7 @@ vi.mock("./vortexControl", () => ({
   purgeMods: vi.fn(async () => undefined),
   installModFromUrl: vi.fn(async () => "download-1"),
   activateGame: vi.fn(),
+  launchGame: vi.fn(async () => undefined),
   restartVortex: vi.fn(),
   dispatchAction: vi.fn(() => ({ type: "NOOP" })),
   backupState: vi.fn(async () => "C:\\fake\\backup.json"),
@@ -141,6 +142,8 @@ describe("mcpServer bearer token gating", () => {
         "vortex_dispatch",
         "backup_state",
         "install_mod_from_url",
+        "activate_game",
+        "launch_game",
         "vortex_restart",
       ]),
     );

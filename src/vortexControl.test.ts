@@ -51,6 +51,7 @@ import {
   describeApi,
   dispatchAction,
   installModFromUrl,
+  launchGame,
   listCategories,
   listDialogs,
   listDownloads,
@@ -78,7 +79,7 @@ function fakeApi(
       getState: () => ({}),
       dispatch: overrides.dispatch ?? vi.fn(),
     },
-    events: { emit: overrides.emit ?? vi.fn(), on: vi.fn() },
+    events: { emit: overrides.emit ?? vi.fn(), on: vi.fn(), eventNames: vi.fn(() => []) },
   } as never;
 }
 
@@ -108,6 +109,23 @@ describe("vortexControl: reflection", () => {
     };
 
     expect(describeApi(api).extensionApis).toEqual(["someExtensionHelper"]);
+  });
+
+  it("describeApi surfaces api's own direct methods (apiMethods) and registered event names", () => {
+    const api = fakeApi();
+    (api as unknown as { runExecutable: () => void; translate: () => void }).runExecutable = () =>
+      undefined;
+    (api as unknown as { runExecutable: () => void; translate: () => void }).translate = () =>
+      undefined;
+    (api as unknown as { events: { eventNames: () => string[] } }).events.eventNames = () => [
+      "deploy-mods",
+      "purge-mods",
+    ];
+
+    const result = describeApi(api);
+
+    expect(result.apiMethods).toEqual(expect.arrayContaining(["runExecutable", "translate"]));
+    expect(result.eventNames).toEqual(["deploy-mods", "purge-mods"]);
   });
 
   it("querySelector calls the named selector with state and extra args", () => {
@@ -448,6 +466,57 @@ describe("vortexControl: games", () => {
     activateGame(fakeApi({ emit }), "skyrimse");
 
     expect(emit).toHaveBeenCalledWith("activate-game", "skyrimse");
+  });
+
+  it("launchGame resolves the primary tool via settings.interface/gameMode.discovered and runs it", async () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      settings: {
+        interface: { primaryTool: { skyrimse: "skse64" } },
+        gameMode: {
+          discovered: {
+            skyrimse: {
+              tools: {
+                skse64: { path: "C:\\Games\\Skyrim\\skse64_loader.exe" },
+              },
+            },
+          },
+        },
+      },
+    });
+    const runExecutable = vi.fn(async () => undefined);
+    (api as unknown as { runExecutable: typeof runExecutable }).runExecutable = runExecutable;
+
+    await launchGame(api);
+
+    expect(runExecutable).toHaveBeenCalledWith("C:\\Games\\Skyrim\\skse64_loader.exe", [], {
+      cwd: undefined,
+      shell: false,
+      detach: true,
+      suggestDeploy: true,
+    });
+  });
+
+  it("launchGame throws when the game has no primary tool configured", async () => {
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      settings: { interface: { primaryTool: {} }, gameMode: { discovered: {} } },
+    });
+
+    await expect(launchGame(api, "skyrimse")).rejects.toThrow(/No primary tool configured/);
+  });
+
+  it("launchGame throws when the configured primary tool isn't in discovered tools", async () => {
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      settings: {
+        interface: { primaryTool: { skyrimse: "skse64" } },
+        gameMode: { discovered: { skyrimse: { tools: {} } } },
+      },
+    });
+
+    await expect(launchGame(api, "skyrimse")).rejects.toThrow(/not in discovered tools/);
   });
 });
 

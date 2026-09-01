@@ -36,6 +36,7 @@ vi.mock("./vortexControl", () => ({
   purgeMods: vi.fn(async () => undefined),
   installModFromUrl: vi.fn(async () => "download-1"),
   activateGame: vi.fn(),
+  launchGame: vi.fn(async () => undefined),
   restartVortex: vi.fn(),
   dispatchAction: vi.fn(() => ({ type: "NOOP" })),
   backupState: vi.fn(async () => "C:\\fake\\backup.json"),

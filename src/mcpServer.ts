@@ -355,6 +355,25 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "launch_game",
+    {
+      description:
+        "Launch a game's configured primary tool (e.g. SKSE, or the vanilla exe if none " +
+        "is set) — the same operation as Vortex's own 'Play' button, including its " +
+        "suggestDeploy check, which can surface a blocking dialog (see list_dialogs/" +
+        "vortex_dispatch's closeDialog) if files changed outside Vortex since the last " +
+        "deploy. Throws if the game has no primary tool configured.",
+      inputSchema: z.object({
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+      }),
+    },
+    async ({ gameId }) => {
+      await control.launchGame(api, gameId);
+      return { content: [{ type: "text", text: `Launched ${gameId ?? "active game"}` }] };
+    },
+  );
+
+  server.registerTool(
     "vortex_restart",
     {
       description:
