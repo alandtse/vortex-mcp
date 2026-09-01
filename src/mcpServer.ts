@@ -346,6 +346,46 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "get_nexus_mod_info",
+    {
+      description:
+        "Look up a mod's info from Nexus Mods via Vortex's own built-in integration and " +
+        "the user's existing Vortex login — no separate API key needed. modId can be " +
+        "either a Vortex-internal mod id (resolved via attributes.modId) or a Nexus " +
+        "numeric mod id directly.",
+      inputSchema: z.object({
+        modId: z.union([z.string(), z.number()]).describe("Vortex mod id or Nexus numeric mod id"),
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+      }),
+    },
+    async ({ modId, gameId }) => ({
+      content: [jsonText(await control.getNexusModInfo(api, modId, gameId))],
+    }),
+  );
+
+  server.registerTool(
+    "check_nexus_mod_updates",
+    {
+      description:
+        "Check installed Nexus-sourced mods for available updates via Vortex's own " +
+        "built-in integration and the user's existing Vortex login — no separate API " +
+        "key. Defaults to every installed mod with source 'nexus'; pass modIds to check " +
+        "a specific subset. Consumes the user's real Nexus API request quota — don't " +
+        "call this in a loop.",
+      inputSchema: z.object({
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+        modIds: z
+          .array(z.string())
+          .optional()
+          .describe("Vortex mod ids to check; defaults to every installed Nexus-sourced mod"),
+      }),
+    },
+    async ({ gameId, modIds }) => ({
+      content: [jsonText(await control.checkNexusModUpdates(api, gameId, modIds))],
+    }),
+  );
+
+  server.registerTool(
     "list_dialogs",
     {
       description:

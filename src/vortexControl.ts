@@ -1325,3 +1325,91 @@ export async function findMissingDeployedFiles(
   discrepancies.sort((a, b) => a.plugin.localeCompare(b.plugin));
   return discrepancies;
 }
+
+// api.ext.nexusGetModInfo / api.ext.nexusCheckModsVersion — Vortex's own built-in Nexus
+// Mods integration, using the user's existing Vortex login, no separate API key needed.
+// api.ext functions have arbitrary signatures (extensionApis is informational-only, no
+// generic caller exists), so these are hand-written wrappers, not a generic dispatcher.
+// Real signatures confirmed by reading Vortex's own installed app.asar bundle (its source
+// map comments survive minification) rather than guessed:
+//   nexusGetModInfo(gameId: string, modId: number): Promise<Partial<IModInfo>>
+//   nexusCheckModsVersion(gameId: string, mods: IMod[], forceFull?: boolean): Promise<string[]>
+//   (checkModsVersion resolves to [] and shows its own error notification if the user
+//   isn't logged in to Nexus Mods — handled by Vortex itself, not duplicated here.)
+
+function getExtensionApi<T>(api: IExtensionApi, name: string): T {
+  const fn = (api.ext as unknown as Record<string, unknown>)[name];
+  if (typeof fn !== "function") {
+    throw new Error(`${name} isn't available — the extension providing it may not be loaded.`);
+  }
+  return fn as T;
+}
+
+/**
+ * Looks up a mod's info from Nexus Mods via Vortex's own built-in integration and the
+ * user's existing Vortex login. `modId` can be either a Vortex-internal mod id (resolved
+ * to its Nexus mod id via attributes.modId) or a Nexus numeric mod id directly.
+ */
+export async function getNexusModInfo(
+  api: IExtensionApi,
+  modId: string | number,
+  gameId?: string,
+): Promise<Record<string, unknown>> {
+  const st = state(api);
+  const targetGameId = gameId ?? selectors.activeGameId(st);
+  if (!targetGameId) {
+    throw new Error("No active game and no gameId provided");
+  }
+  let nexusModId: number;
+  if (typeof modId === "number") {
+    nexusModId = modId;
+  } else {
+    const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
+    const attrs = mods[modId]?.attributes as { modId?: number } | undefined;
+    if (attrs?.modId === undefined) {
+      throw new Error(`Mod '${modId}' has no known Nexus mod id (attributes.modId).`);
+    }
+    nexusModId = attrs.modId;
+  }
+  const fn = getExtensionApi<
+    (gameId: string, nexusModId: number) => Promise<Record<string, unknown>>
+  >(api, "nexusGetModInfo");
+  return fn(targetGameId, nexusModId);
+}
+
+export interface ModUpdateCheckResult {
+  checkedCount: number;
+  /** Vortex-internal mod ids that have an update available on Nexus. */
+  updatedModIds: string[];
+}
+
+/**
+ * Checks installed Nexus-sourced mods for available updates via Vortex's own built-in
+ * integration and the user's existing Vortex login — no separate API key. Defaults to
+ * every installed mod with source "nexus"; pass modIds to check a specific subset.
+ * Consumes the user's real Nexus API request quota — don't call this in a loop.
+ */
+export async function checkNexusModUpdates(
+  api: IExtensionApi,
+  gameId?: string,
+  modIds?: string[],
+): Promise<ModUpdateCheckResult> {
+  const st = state(api);
+  const targetGameId = gameId ?? selectors.activeGameId(st);
+  if (!targetGameId) {
+    throw new Error("No active game and no gameId provided");
+  }
+  const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
+  const targetMods = (modIds ?? Object.keys(mods))
+    .map((id) => mods[id])
+    .filter(
+      (mod): mod is IMod =>
+        mod !== undefined &&
+        (mod.attributes as { source?: string } | undefined)?.source === "nexus",
+    );
+  const fn = getExtensionApi<
+    (gameId: string, mods: IMod[], forceFull?: boolean) => Promise<string[]>
+  >(api, "nexusCheckModsVersion");
+  const updatedModIds = await fn(targetGameId, targetMods, false);
+  return { checkedCount: targetMods.length, updatedModIds };
+}

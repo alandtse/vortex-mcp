@@ -48,6 +48,7 @@ import { actions, fs, selectors, util } from "@nexusmods/vortex-api";
 import {
   activateGame,
   backupState,
+  checkNexusModUpdates,
   cloneProfile,
   deployMods,
   describeApi,
@@ -55,6 +56,7 @@ import {
   findMissingDeployedFiles,
   findMissingMasters,
   findModByFile,
+  getNexusModInfo,
   installModFromUrl,
   launchGame,
   listCategories,
@@ -1394,5 +1396,82 @@ describe("vortexControl: findMissingDeployedFiles", () => {
     });
 
     expect(await findMissingDeployedFiles(api)).toEqual([]);
+  });
+});
+
+describe("vortexControl: getNexusModInfo / checkNexusModUpdates", () => {
+  it("getNexusModInfo resolves a Vortex mod id to its Nexus mod id before calling the extension api", async () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const nexusGetModInfo = vi.fn(async () => ({ name: "Cool Mod" }));
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: { modA: { id: "modA", attributes: { modId: 63979 } } },
+        },
+      },
+    });
+    (api as unknown as { ext: Record<string, unknown> }).ext = { nexusGetModInfo };
+
+    const result = await getNexusModInfo(api, "modA");
+
+    expect(nexusGetModInfo).toHaveBeenCalledWith("skyrimse", 63979);
+    expect(result).toEqual({ name: "Cool Mod" });
+  });
+
+  it("getNexusModInfo uses a numeric modId directly without a state lookup", async () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const nexusGetModInfo = vi.fn(async () => ({ name: "Cool Mod" }));
+    const api = fakeApi();
+    (api as unknown as { ext: Record<string, unknown> }).ext = { nexusGetModInfo };
+
+    await getNexusModInfo(api, 12345);
+
+    expect(nexusGetModInfo).toHaveBeenCalledWith("skyrimse", 12345);
+  });
+
+  it("getNexusModInfo throws when the Vortex mod has no known Nexus mod id", async () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: { mods: { skyrimse: { modA: { id: "modA", attributes: {} } } } },
+    });
+    (api as unknown as { ext: Record<string, unknown> }).ext = { nexusGetModInfo: vi.fn() };
+
+    await expect(getNexusModInfo(api, "modA")).rejects.toThrow(/no known Nexus mod id/);
+  });
+
+  it("getNexusModInfo throws a clear error when the extension isn't loaded", async () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { ext: Record<string, unknown> }).ext = {};
+
+    await expect(getNexusModInfo(api, 12345)).rejects.toThrow(/isn't available/);
+  });
+
+  it("checkNexusModUpdates only checks installed mods sourced from nexus", async () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const nexusCheckModsVersion = vi.fn(async () => ["modA"]);
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: {
+            modA: { id: "modA", attributes: { source: "nexus" } },
+            modB: { id: "modB", attributes: { source: "manual" } },
+          },
+        },
+      },
+    });
+    (api as unknown as { ext: Record<string, unknown> }).ext = { nexusCheckModsVersion };
+
+    const result = await checkNexusModUpdates(api);
+
+    expect(nexusCheckModsVersion).toHaveBeenCalledWith(
+      "skyrimse",
+      [expect.objectContaining({ id: "modA" })],
+      false,
+    );
+    expect(result).toEqual({ checkedCount: 1, updatedModIds: ["modA"] });
   });
 });
