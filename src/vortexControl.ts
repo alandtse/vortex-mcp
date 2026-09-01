@@ -86,35 +86,42 @@ function store(api: IExtensionApi) {
 export interface ApiDescription {
   /** Names callable via query({ selector, args }) — each is (state, ...args) => value. */
   selectors: string[];
-  /** All of Vortex's action-creator names (informational; most are NOT directly callable). */
+  /**
+   * All of Vortex's action-creator names — every one of these is dispatchable via
+   * vortex_dispatch. The loopback bind + bearer token is the actual security boundary
+   * (matches what a human at Vortex's own UI can already do); there is no further
+   * per-action allowlist on top of that.
+   */
   actions: string[];
-  /** Subset of `actions` actually callable via vortex_dispatch — see DISPATCHABLE_ACTIONS. */
-  dispatchableActions: string[];
-  /** Positional argument order for each dispatchableActions entry, e.g. "gameId: string, modId: string". */
+  /**
+   * Real positional argument order for the actions this project has bothered to verify
+   * against Vortex's own source/behavior, e.g. "gameId: string, modId: string" — pure
+   * documentation to save you a source-read, not a list of what's callable (see `actions`
+   * for that — everything there works). An action missing here still dispatches fine;
+   * you just don't get a pre-verified argument order.
+   */
   dispatchHints: Record<string, string>;
   /** Top-level keys of the Redux state tree, walkable via query({ path }). */
   stateKeys: string[];
   /**
    * Names extensions have exposed via context.registerAPI (api.ext.<name>) — Vortex core's
    * own (Nexus/Mods/Downloads helpers) plus any third-party extension that does the same.
-   * Informational only: unlike `dispatchableActions`, these are arbitrary extension
-   * functions with unvetted signatures and side effects, not uniform action creators, so
-   * there is no generic caller for them — same reasoning DISPATCHABLE_ACTIONS excludes
-   * admin-level actions. A specific one becomes a dedicated tool if it's actually needed.
+   * All of these are callable via vortex_dispatch too (same token boundary as `actions`) —
+   * arbitrary signatures, so there's no uniform arg format to validate against, but nothing
+   * here is specially blocked.
    */
   extensionApis: string[];
-  /** Subset of `extensionApis` actually callable via vortex_query's extApi mode — see EXTENSION_API_ALLOWLIST. */
-  callableExtensionApis: string[];
-  /** Positional argument order for each callableExtensionApis entry. */
+  /** Positional argument order for the extensionApis entries this project has verified — same caveat as dispatchHints. */
   extensionApiHints: Record<string, string>;
   /**
    * Direct method names on the live IExtensionApi instance (api.foo(...)) — distinct
    * from selectors/actions/extensionApis. This is how a real capability gap got found:
    * runExecutable (launching a game/tool) is one of these, not a Redux action or an
    * api.ext export, so nothing in the other three lists would ever surface it.
-   * Informational only, same reasoning as extensionApis — arbitrary signatures/side
-   * effects, no uniform generic caller. A specific one becomes a dedicated tool
-   * (see launch_game) once it's confirmed live, not guessed from the type declaration.
+   * Informational only — no generic caller reaches these (arbitrary signatures, and
+   * several are UI-only pickers with no headless meaning). A specific one becomes a
+   * dedicated tool (see launch_game) once it's confirmed live, not guessed from the type
+   * declaration.
    */
   apiMethods: string[];
   /**
@@ -133,12 +140,10 @@ export function describeApi(api: IExtensionApi): ApiDescription {
   return {
     selectors: Object.keys(selectors).toSorted(),
     actions: Object.keys(actions).toSorted(),
-    dispatchableActions: [...DISPATCHABLE_ACTIONS.keys()].toSorted(),
-    dispatchHints: Object.fromEntries(DISPATCHABLE_ACTIONS),
+    dispatchHints: Object.fromEntries(ACTION_HINTS),
     stateKeys: Object.keys(st as object).toSorted(),
     extensionApis: Object.keys(api.ext ?? {}).toSorted(),
-    callableExtensionApis: [...EXTENSION_API_ALLOWLIST.keys()].toSorted(),
-    extensionApiHints: Object.fromEntries(EXTENSION_API_ALLOWLIST),
+    extensionApiHints: Object.fromEntries(EXTENSION_API_HINTS),
     apiMethods: Object.keys(apiRecord)
       .filter((key) => typeof apiRecord[key] === "function")
       .toSorted(),
@@ -168,26 +173,26 @@ export function queryStatePath(api: IExtensionApi, statePath: string[]): unknown
   return value;
 }
 
-// Standard user-tooling actions only: mod metadata/rules, categories, load order,
-// deployment settings, download bookkeeping, and profile lifecycle. Deliberately
-// excludes anything admin-level — game/install/download *paths*, extensions
-// (install/enable/remove), credentials/auth, window/network state — even though
-// those are otherwise plain action creators the same reflection mechanism could
-// reach. This allowlist is the actual enforcement boundary, not just a
-// documentation note.
+// NOT an allowlist — every one of Vortex's ~150 action creators is dispatchable via
+// vortex_dispatch (see dispatchAction below). This map is pure documentation: the real
+// positional argument order (name: type) for the actions this project has actually
+// verified, read from @nexusmods/vortex-api's action-creator payload field names — or,
+// for the three entries typed `any` there (setLoadOrderEntry/setFBLoadOrder/
+// setFBLoadOrderEntry), from their actual definitions in Vortex source
+// (mod_load_order/file_based_loadorder). Surfaced via vortex_describe's dispatchHints so
+// a caller doesn't need to go read source first for these; an action missing here still
+// works via vortex_dispatch, you just don't get a pre-verified argument order.
 //
-// removeProfile is admin-adjacent (permanently deletes the profile's on-disk
-// directory, no undo) and included deliberately: it's the only way to clean up
-// disposable profiles clone_profile creates for testing. Only ever call it on a
-// profile you created for that purpose — never a real user profile.
-//
-// The value is the real positional argument order (name: type), read from
-// @nexusmods/vortex-api's action-creator payload field names — or, for the three
-// entries typed `any` there (setLoadOrderEntry/setFBLoadOrder/setFBLoadOrderEntry),
-// from their actual definitions in Vortex source (mod_load_order/file_based_loadorder).
-// Surfaced via vortex_describe's dispatchHints so a caller doesn't need to go read
-// either source to use vortex_dispatch correctly.
-const DISPATCHABLE_ACTIONS = new Map<string, string>([
+// The security boundary is the loopback bind + bearer token (see mcpServer.ts) — once an
+// operator holds the token they already have "full write privileges" per this project's
+// own documented model, matching what a human at Vortex's own UI can already do. An
+// earlier version of this file gated vortex_dispatch behind this map's key set, excluding
+// "admin-level" actions (paths, extensions, credentials) — removed deliberately: it was a
+// second, hand-maintained boundary that didn't protect against a meaningfully different
+// threat than the token already does, required manual upkeep for every new safe Vortex
+// action, and blocked the trusted case (an agent acting on the operator's own behalf) for
+// no real gain against an adversarial one (who'd already have full access via the token).
+const ACTION_HINTS = new Map<string, string>([
   ["addMod", "gameId: string, mod: IMod"],
   ["addMods", "gameId: string, mods: IMod[]"],
   ["addModRule", "gameId: string, modId: string, rule: IModRule"],
@@ -271,40 +276,48 @@ const DISPATCHABLE_ACTIONS = new Map<string, string>([
 ]);
 
 /**
- * Dispatches a named, allowlisted Vortex action creator. Covers the bulk of Vortex's
- * mod-management action surface generically (new allowlisted actions become callable
- * without a rebuild), but is not a general escape hatch — see DISPATCHABLE_ACTIONS.
+ * Dispatches a named Vortex action creator, or — if `name` isn't a Redux action — calls
+ * a named api.ext function instead. Not allowlisted: every action and every api.ext
+ * function is reachable this way, once the caller holds the write-tier bearer token (see
+ * ACTION_HINTS's comment for why that token, not a second curated list, is the actual
+ * security boundary).
  */
-export function dispatchAction(api: IExtensionApi, name: string, args: unknown[] = []): unknown {
-  if (!DISPATCHABLE_ACTIONS.has(name)) {
-    throw new Error(
-      `Action not allowlisted for dispatch: ${name}. This tool covers standard mod-management ` +
-        "actions only, not admin-level ones (paths, extensions, credentials).",
-    );
-  }
+export async function dispatchAction(
+  api: IExtensionApi,
+  name: string,
+  args: unknown[] = [],
+): Promise<unknown> {
   const fn = (actions as Record<string, unknown>)[name];
-  if (typeof fn !== "function") {
-    throw new Error(`Unknown action: ${name}.`);
+  if (typeof fn === "function") {
+    const result = (fn as (...fnArgs: unknown[]) => unknown)(...args);
+    // Most actions are plain redux-act action creators returning {type, payload}. A few
+    // (closeDialog, closeDialogs, showDialog) are thunks — plain functions taking
+    // (dispatch, getState) — since Vortex uses redux-thunk middleware, dispatching the
+    // function itself (not a {type} object) is the correct call; there's no natural
+    // {type, payload} to report back for these, so the response just confirms what ran.
+    if (typeof result === "function") {
+      store(api).dispatch(result as (...fnArgs: unknown[]) => unknown);
+      return { dispatched: name, thunk: true };
+    }
+    if (
+      result === null ||
+      typeof result !== "object" ||
+      typeof (result as { type?: unknown }).type !== "string"
+    ) {
+      throw new Error(`${name} did not return a dispatchable action object.`);
+    }
+    store(api).dispatch(result as { type: string });
+    return result;
   }
-  const result = (fn as (...fnArgs: unknown[]) => unknown)(...args);
-  // Most allowlisted actions are plain redux-act action creators returning {type, payload}.
-  // A few (closeDialog, closeDialogs, showDialog) are thunks — plain functions taking
-  // (dispatch, getState) — since Vortex uses redux-thunk middleware, dispatching the
-  // function itself (not a {type} object) is the correct call; there's no natural
-  // {type, payload} to report back for these, so the response just confirms what ran.
-  if (typeof result === "function") {
-    store(api).dispatch(result as (...fnArgs: unknown[]) => unknown);
-    return { dispatched: name, thunk: true };
+
+  const extFn = ((api.ext ?? {}) as unknown as Record<string, unknown>)[name];
+  if (typeof extFn === "function") {
+    return (extFn as (...fnArgs: unknown[]) => unknown)(...args);
   }
-  if (
-    result === null ||
-    typeof result !== "object" ||
-    typeof (result as { type?: unknown }).type !== "string"
-  ) {
-    throw new Error(`${name} did not return a dispatchable action object.`);
-  }
-  store(api).dispatch(result as { type: string });
-  return result;
+
+  throw new Error(
+    `Unknown action or api.ext function: ${name}. Check vortex_describe's actions/extensionApis lists.`,
+  );
 }
 
 export function switchProfile(api: IExtensionApi, profileId: string): void {
@@ -1334,14 +1347,11 @@ export async function findMissingDeployedFiles(
 
 // api.ext.* — Vortex's own built-in extension APIs (Nexus Mods integration, using the
 // user's existing Vortex login, no separate API key needed; other extensions can add
-// more). Arbitrary signatures, no uniform shape (extensionApis is informational-only in
-// vortex_describe) — same reasoning DISPATCHABLE_ACTIONS exists for Redux actions, this
-// is the read-side equivalent: an explicit allowlist + one generic caller, reachable via
-// vortex_query's `extApi` mode, instead of a bespoke tool per api.ext function (found the
-// hard way — get_nexus_mod_info started as its own dedicated tool before being folded in
-// here). Real signatures confirmed by reading Vortex's own installed app.asar bundle (its
-// source map comments survive minification) rather than guessed.
-const EXTENSION_API_ALLOWLIST = new Map<string, string>([
+// more). Not an allowlist — see ACTION_HINTS's comment for why (the token is the real
+// boundary); this map is pure documentation for the arg order of the ones this project
+// has verified. Real signatures confirmed by reading Vortex's own installed app.asar
+// bundle (its source map comments survive minification) rather than guessed.
+const EXTENSION_API_HINTS = new Map<string, string>([
   [
     "nexusGetModInfo",
     "gameId: string, nexusModId: number — returns Partial<IModInfo>. nexusModId is the " +
@@ -1352,32 +1362,11 @@ const EXTENSION_API_ALLOWLIST = new Map<string, string>([
 ]);
 
 function getExtensionApi<T>(api: IExtensionApi, name: string): T {
-  const fn = (api.ext as unknown as Record<string, unknown>)[name];
+  const fn = ((api.ext ?? {}) as unknown as Record<string, unknown>)[name];
   if (typeof fn !== "function") {
     throw new Error(`${name} isn't available — the extension providing it may not be loaded.`);
   }
   return fn as T;
-}
-
-/**
- * Calls a named, allowlisted api.ext function — the read-side counterpart to
- * dispatchAction, for the same reason: most api.ext functions are simple enough
- * (scalar args, no join needed) that a bespoke tool per one would just be tool-count
- * sprawl. See EXTENSION_API_ALLOWLIST's own comment for what's covered and why.
- */
-export async function callExtensionApi(
-  api: IExtensionApi,
-  name: string,
-  args: unknown[] = [],
-): Promise<unknown> {
-  if (!EXTENSION_API_ALLOWLIST.has(name)) {
-    throw new Error(
-      `Extension API not allowlisted: ${name}. Only vetted, simple api.ext functions are ` +
-        "reachable this way — a genuine join (like check_nexus_mod_updates) stays a dedicated tool.",
-    );
-  }
-  const fn = getExtensionApi<(...fnArgs: unknown[]) => Promise<unknown>>(api, name);
-  return fn(...args);
 }
 
 export interface ModUpdateCheckResult {

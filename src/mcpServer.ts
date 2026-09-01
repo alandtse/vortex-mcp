@@ -37,16 +37,16 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
     {
       description:
         "Discover the live Vortex API surface: callable selector names (for vortex_query), " +
-        "the subset of action names actually callable via vortex_dispatch " +
-        "(`dispatchableActions` — `actions` itself lists everything but most aren't directly " +
-        "callable) with their real positional argument order (`dispatchHints`, e.g. " +
-        'dispatchHints.setModEnabled = "profileId: string, modId: string, enable: boolean"), ' +
-        "top-level Redux state keys (for vortex_query's path mode, includes state added by any " +
-        "loaded extension, not just core Vortex), and `extensionApis` — names extensions have " +
-        "exposed via registerAPI (api.ext.<name>), informational only, not callable through " +
-        "this server. Reflects whatever Vortex is actually running right now — new selectors/" +
-        "actions/state show up here without an extension rebuild (dispatchHints is the one " +
-        "field that's static, sourced from Vortex's own type declarations).",
+        "every action/api.ext function name dispatchable via vortex_dispatch (`actions`/" +
+        "`extensionApis` — all of these are callable, no allowlist; the loopback bind + " +
+        "bearer token is the real security boundary), with real positional argument order " +
+        "for the ones this project has verified (`dispatchHints`/`extensionApiHints`, e.g. " +
+        'dispatchHints.setModEnabled = "profileId: string, modId: string, enable: boolean" ' +
+        "— missing from these maps just means no pre-verified arg order, not that it's " +
+        "unavailable), and top-level Redux state keys (for vortex_query's path mode, " +
+        "includes state added by any loaded extension, not just core Vortex). Reflects " +
+        "whatever Vortex is actually running right now — new selectors/actions/state show " +
+        "up here without an extension rebuild.",
       inputSchema: z.object({}),
     },
     async () => ({
@@ -58,32 +58,26 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
     "vortex_query",
     {
       description:
-        "Read Vortex state or call a vetted api.ext function. Three modes: `selector` " +
-        "calls that named vortex-api selector as `(state, ...args)` (e.g. " +
-        "selector='activeProfileId', or selector='profiles' then cross-reference the id " +
-        "yourself); `path` walks the Redux state tree by key (e.g. " +
-        "path=['persistent','mods','skyrimse']); `extApi` calls a named, allowlisted " +
-        "api.ext function as `(...args)` (e.g. extApi='nexusGetModInfo' — see " +
-        "vortex_describe's extensionApiHints for the full list and argument order). Use " +
-        "vortex_describe first to see what's available. Read-only.",
+        "Read Vortex state. Two modes: `selector` calls that named vortex-api selector as " +
+        "`(state, ...args)` (e.g. selector='activeProfileId', or selector='profiles' then " +
+        "cross-reference the id yourself); `path` walks the Redux state tree by key " +
+        "(e.g. path=['persistent','mods','skyrimse']). Use vortex_describe first to see what's " +
+        "available. Genuinely read-only (can't mutate anything) — for calling an api.ext " +
+        "function (which can have side effects), use vortex_dispatch instead.",
       inputSchema: z.object({
         selector: z.string().optional(),
-        path: z.array(z.string()).optional(),
-        extApi: z.string().optional(),
         args: z.array(z.unknown()).optional(),
+        path: z.array(z.string()).optional(),
       }),
     },
-    async ({ selector, args, path, extApi }) => {
+    async ({ selector, args, path }) => {
       if (selector !== undefined) {
         return { content: [jsonText(control.querySelector(api, selector, args))] };
       }
       if (path !== undefined) {
         return { content: [jsonText(control.queryStatePath(api, path))] };
       }
-      if (extApi !== undefined) {
-        return { content: [jsonText(await control.callExtensionApi(api, extApi, args))] };
-      }
-      throw new Error("Provide `selector`, `path`, or `extApi`.");
+      throw new Error("Provide either `selector` or `path`.");
     },
   );
 
@@ -437,23 +431,24 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
     "vortex_dispatch",
     {
       description:
-        "Dispatch a named, allowlisted Vortex action creator — mod metadata/rules, categories, " +
-        "load order, deployment settings, download bookkeeping. Covers the bulk of Vortex's " +
-        "mod-management surface generically (new allowlisted actions become callable without a " +
-        "rebuild), but is intentionally NOT a general escape hatch: admin-level actions (game/" +
-        "install/download paths, extensions, credentials, profile deletion) are excluded even " +
-        "though they're otherwise plain action creators. Use vortex_describe's `actions` list " +
-        "for candidate names, then check Vortex's source for the exact argument order.",
+        "Dispatch a named Vortex action creator, or — if the name isn't a Redux action — " +
+        "call a named api.ext function instead (e.g. action='nexusGetModInfo'). Not " +
+        "allowlisted: everything in vortex_describe's `actions`/`extensionApis` lists is " +
+        "callable this way once you hold the write-tier token — that token, not a curated " +
+        "list, is the actual security boundary, matching what a human at Vortex's own UI " +
+        "can already do. Use vortex_describe's `dispatchHints`/`extensionApiHints` for the " +
+        "real argument order where this project has verified one; for anything else, check " +
+        "Vortex's source or test carefully with a state read before/after.",
       inputSchema: z.object({
-        action: z.string().describe("Action creator name, e.g. 'setLoadOrder'"),
+        action: z.string().describe("Action creator name or api.ext function name"),
         args: z
           .array(z.unknown())
           .optional()
-          .describe("Positional arguments for the action creator"),
+          .describe("Positional arguments for the action creator or api.ext function"),
       }),
     },
     async ({ action, args }) => {
-      const dispatched = control.dispatchAction(api, action, args);
+      const dispatched = await control.dispatchAction(api, action, args);
       return { content: [jsonText(dispatched)] };
     },
   );

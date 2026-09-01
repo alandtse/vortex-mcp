@@ -37,7 +37,6 @@ vi.mock("./vortexControl", () => ({
   listDuplicateMods: vi.fn(async () => []),
   listKnownModConflicts: vi.fn(() => []),
   findMissingDeployedFiles: vi.fn(async () => []),
-  callExtensionApi: vi.fn(async () => ({})),
   checkNexusModUpdates: vi.fn(async () => ({ checkedCount: 0, updatedModIds: [] })),
   listFileConflicts: vi.fn(async () => []),
   setModsEnabled: vi.fn(async () => undefined),
@@ -47,9 +46,11 @@ vi.mock("./vortexControl", () => ({
   activateGame: vi.fn(),
   launchGame: vi.fn(async () => undefined),
   restartVortex: vi.fn(),
-  dispatchAction: vi.fn(() => ({ type: "NOOP" })),
+  dispatchAction: vi.fn(async () => ({ type: "NOOP" })),
   backupState: vi.fn(async () => "C:\\fake\\backup.json"),
 }));
+
+import { dispatchAction } from "./vortexControl";
 
 let port: number;
 let server: http.Server;
@@ -156,5 +157,25 @@ describe("mcpServer bearer token gating", () => {
         "vortex_restart",
       ]),
     );
+  });
+
+  it("vortex_dispatch passes any action/api.ext name through to dispatchAction, not just a curated subset", async () => {
+    const res = await request(
+      { ...jsonHeaders, authorization: "Bearer test-secret" },
+      {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: {
+          name: "vortex_dispatch",
+          arguments: { action: "nexusGetModInfo", args: ["skyrimse", 63979] },
+        },
+      },
+    );
+    expect(res.status).toBe(200);
+    expect(dispatchAction).toHaveBeenCalledWith(expect.anything(), "nexusGetModInfo", [
+      "skyrimse",
+      63979,
+    ]);
   });
 });

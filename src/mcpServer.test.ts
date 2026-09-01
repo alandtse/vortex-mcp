@@ -37,7 +37,6 @@ vi.mock("./vortexControl", () => ({
   listDuplicateMods: vi.fn(async () => []),
   listKnownModConflicts: vi.fn(() => []),
   findMissingDeployedFiles: vi.fn(async () => []),
-  callExtensionApi: vi.fn(async () => ({})),
   checkNexusModUpdates: vi.fn(async () => ({ checkedCount: 0, updatedModIds: [] })),
   listFileConflicts: vi.fn(async () => []),
   setModsEnabled: vi.fn(async () => undefined),
@@ -47,11 +46,9 @@ vi.mock("./vortexControl", () => ({
   activateGame: vi.fn(),
   launchGame: vi.fn(async () => undefined),
   restartVortex: vi.fn(),
-  dispatchAction: vi.fn(() => ({ type: "NOOP" })),
+  dispatchAction: vi.fn(async () => ({ type: "NOOP" })),
   backupState: vi.fn(async () => "C:\\fake\\backup.json"),
 }));
-
-import { callExtensionApi } from "./vortexControl";
 
 let startMcpServer: typeof import("./mcpServer").startMcpServer;
 let port: number;
@@ -209,23 +206,17 @@ describe("mcpServer HTTP gating", () => {
     expect(parsed.result?.content?.[0]?.text).toBe("null");
   });
 
-  it("vortex_query's extApi mode calls callExtensionApi with the given name and args", async () => {
+  it("vortex_query throws a clear error when neither selector nor path is given", async () => {
     const res = await request({
       headers: jsonHeaders,
       body: {
         jsonrpc: "2.0",
         id: 4,
         method: "tools/call",
-        params: {
-          name: "vortex_query",
-          arguments: { extApi: "nexusGetModInfo", args: ["skyrimse", 63979] },
-        },
+        params: { name: "vortex_query", arguments: {} },
       },
     });
     expect(res.status).toBe(200);
-    expect(callExtensionApi).toHaveBeenCalledWith(expect.anything(), "nexusGetModInfo", [
-      "skyrimse",
-      63979,
-    ]);
+    expect(res.body).toContain("Provide either");
   });
 });
