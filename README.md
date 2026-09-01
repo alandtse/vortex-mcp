@@ -78,7 +78,7 @@ hand-transcribed, so it can't silently drift from the code.
 | Tool                          | Access | What it does                                                                                                                                 |
 | ----------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `vortex_describe`             | read   | Discover the live Vortex API surface: callable selector names (for vortex_query), the subset of action names actually callable via vortex_d… |
-| `vortex_query`                | read   | Read Vortex state. Two modes: `selector` calls that named vortex-api selector as `(state, ...args)` (e.g. selector='activeProfileId', or se… |
+| `vortex_query`                | read   | Read Vortex state or call a vetted api.ext function.                                                                                         |
 | `list_mods`                   | read   | List mods for a game (defaults to the active game), with friendly names and enabled state for the active profile — a formatted join vortex_… |
 | `list_load_order`             | read   | List the current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index.                                                          |
 | `list_categories`             | read   | List a game's mod categories (defaults to the active game), sorted by display order, with a mod count per category — a join vortex_query ca… |
@@ -92,7 +92,6 @@ hand-transcribed, so it can't silently drift from the code.
 | `list_duplicate_mods`         | read   | Find installed mods that look like duplicates or redundant leftovers — never auto-resolved, purely informational (same 'report candidates,…  |
 | `list_known_mod_conflicts`    | read   | Surfaces real 'conflicts'-type rules Vortex already has recorded on enabled mods (mod.rules — the same field list_mod_rules reads, often po… |
 | `find_missing_deployed_files` | read   | Find plugins where Vortex's load-order state, what's actually deployed to the game's Data folder, and what the game's own plugins.txt says…  |
-| `get_nexus_mod_info`          | read   | Look up a mod's info from Nexus Mods via Vortex's own built-in integration and the user's existing Vortex login — no separate API key neede… |
 | `check_nexus_mod_updates`     | read   | Check installed Nexus-sourced mods for available updates via Vortex's own built-in integration and the user's existing Vortex login — no se… |
 | `list_dialogs`                | read   | List Vortex's currently-open modal dialogs (e.g. a 'files changed outside Vortex' prompt that can block a deploy) — distinct from list_noti… |
 | `switch_profile`              | write  | Switch Vortex to a different profile by id.                                                                                                  |
@@ -142,6 +141,23 @@ callback positions per event; `clone_profile` is a filesystem copy plus a
 dispatch. None of that is reachable by name-based reflection no matter how
 uniform the simple case gets — the validation and orchestration in those
 wrappers is the point, not boilerplate to genericize away.
+
+`vortex_query`'s `extApi` mode is the read-side equivalent of
+`vortex_dispatch`, for `api.ext.*` functions (Vortex's own built-in Nexus
+Mods integration, plus anything a third-party extension registers the same
+way) — gated by its own allowlist, `EXTENSION_API_ALLOWLIST`, surfaced via
+`vortex_describe`'s `callableExtensionApis`/`extensionApiHints`. It exists
+because a first pass got this wrong: `get_nexus_mod_info` and
+`check_nexus_mod_updates` were both written as one-off tools wrapping a
+single `api.ext` function each — the exact one-tool-per-operation pattern
+this whole design exists to avoid, and a pattern that would have kept
+growing by one tool for every further Nexus capability (endorsements,
+collections, ...). `get_nexus_mod_info` needed no join — it's gone,
+folded into `extApi`. `check_nexus_mod_updates` stayed a dedicated tool
+because it does a real join `vortex_query` can't do in one call (resolving
+mod ids to full `IMod` records and filtering to Nexus-sourced ones before
+calling `nexusCheckModsVersion`) — the same bar `list_mods` already
+clears.
 
 ### Keeping this table in sync
 
@@ -205,7 +221,7 @@ read tools (`vortex_describe`, `vortex_query`, `list_mods`, `list_load_order`,
 `list_categories`, `list_downloads`, `list_notifications`, `list_mod_rules`,
 `find_mod_by_file`, `list_file_conflicts`, `find_missing_masters`,
 `list_runtime_errors`, `list_duplicate_mods`, `list_known_mod_conflicts`,
-`find_missing_deployed_files`, `get_nexus_mod_info`, `check_nexus_mod_updates`,
+`find_missing_deployed_files`, `check_nexus_mod_updates`,
 `list_dialogs`) are ever registered
 — none of the eleven write tools
 (`switch_profile`, `clone_profile`, `vortex_dispatch`, `backup_state`,
