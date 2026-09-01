@@ -52,6 +52,7 @@ import {
   deployMods,
   describeApi,
   dispatchAction,
+  findMissingMasters,
   findModByFile,
   installModFromUrl,
   launchGame,
@@ -930,5 +931,81 @@ describe("vortexControl: findModByFile / listFileConflicts", () => {
     );
 
     expect(await listFileConflicts(api)).toEqual([]);
+  });
+});
+
+function buildTES4Buffer(masters: string[]): Buffer {
+  const subrecords = masters.map((master) => {
+    const nameBuf = Buffer.from(`${master}\0`, "ascii");
+    const sizeBuf = Buffer.alloc(2);
+    sizeBuf.writeUInt16LE(nameBuf.length, 0);
+    return Buffer.concat([Buffer.from("MAST", "ascii"), sizeBuf, nameBuf]);
+  });
+  const data = Buffer.concat(subrecords);
+  const header = Buffer.alloc(24);
+  header.write("TES4", 0, "ascii");
+  header.writeUInt32LE(data.length, 4);
+  return Buffer.concat([header, data]);
+}
+
+describe("vortexControl: findMissingMasters", () => {
+  let tempRoot: string;
+
+  beforeEach(async () => {
+    tempRoot = await mkdtemp(path.join(os.tmpdir(), "vortex-mcp-test-plugins-"));
+    await mkdir(path.join(tempRoot, "Data"), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  async function writePlugin(name: string, masters: string[]): Promise<void> {
+    await writeFile(path.join(tempRoot, "Data", name), buildTES4Buffer(masters));
+  }
+
+  function apiWithLoadOrder(loadOrder: Record<string, { loadOrder: number; enabled: boolean }>) {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      settings: { gameMode: { discovered: { skyrimse: { path: tempRoot } } } },
+      loadOrder,
+    });
+    return api;
+  }
+
+  it("finds a plugin whose master isn't enabled, by reading its real TES4 header", async () => {
+    await writePlugin("Skyrim.esm", []);
+    await writePlugin("Patch.esp", ["Skyrim.esm", "MissingMod.esm"]);
+    const api = apiWithLoadOrder({
+      "Skyrim.esm": { loadOrder: 0, enabled: true },
+      "Patch.esp": { loadOrder: 1, enabled: true },
+    });
+
+    expect(await findMissingMasters(api)).toEqual([
+      { plugin: "Patch.esp", missingMasters: ["MissingMod.esm"] },
+    ]);
+  });
+
+  it("returns nothing when every master is enabled", async () => {
+    await writePlugin("Skyrim.esm", []);
+    await writePlugin("Patch.esp", ["Skyrim.esm"]);
+    const api = apiWithLoadOrder({
+      "Skyrim.esm": { loadOrder: 0, enabled: true },
+      "Patch.esp": { loadOrder: 1, enabled: true },
+    });
+
+    expect(await findMissingMasters(api)).toEqual([]);
+  });
+
+  it("throws when the game isn't discovered", async () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      settings: { gameMode: { discovered: {} } },
+      loadOrder: {},
+    });
+
+    await expect(findMissingMasters(api)).rejects.toThrow(/not discovered/);
   });
 });

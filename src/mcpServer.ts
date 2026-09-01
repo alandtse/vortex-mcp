@@ -237,6 +237,24 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "find_missing_masters",
+    {
+      description:
+        "Find enabled plugins whose master files aren't themselves enabled — reads each " +
+        "plugin's real TES4 header from the game's Data folder (the Bethesda plugin " +
+        "format's own binary spec, not Vortex-specific), since Vortex doesn't expose a " +
+        "resolved-masters selector. A very common real troubleshooting need (a patch " +
+        "enabled without its base mod).",
+      inputSchema: z.object({
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+      }),
+    },
+    async ({ gameId }) => ({
+      content: [jsonText(await control.findMissingMasters(api, gameId))],
+    }),
+  );
+
+  server.registerTool(
     "list_dialogs",
     {
       description:

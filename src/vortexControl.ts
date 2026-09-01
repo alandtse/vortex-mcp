@@ -1,6 +1,6 @@
 import path from "node:path";
 import crypto from "node:crypto";
-import { readdir, stat } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 
 import { actions, selectors, util, fs, log, types } from "@nexusmods/vortex-api";
 
@@ -878,4 +878,94 @@ export async function listFileConflicts(
   }
   entries.sort((a, b) => a.file.localeCompare(b.file));
   return options.limit !== undefined ? entries.slice(0, options.limit) : entries;
+}
+
+// Reads a plugin's (.esp/.esm/.esl) master list straight from its TES4 header — the
+// Bethesda plugin format is a fixed, unchanging binary spec (not Vortex-specific), so
+// this is safe to implement directly rather than guessing at Vortex behavior. Record
+// header: 4-byte type, 4-byte data size (uint32 LE), 16 more header bytes, then that
+// many bytes of subrecords (4-byte type, 2-byte size (uint16 LE), data). MAST
+// subrecords hold a null-terminated master filename.
+async function readPluginMasters(filePath: string): Promise<string[]> {
+  const handle = await open(filePath, "r");
+  try {
+    const head = Buffer.alloc(24);
+    const { bytesRead } = await handle.read(head, 0, 24, 0);
+    if (bytesRead < 24 || head.toString("ascii", 0, 4) !== "TES4") {
+      return [];
+    }
+    const dataSize = head.readUInt32LE(4);
+    const data = Buffer.alloc(dataSize);
+    await handle.read(data, 0, dataSize, 24);
+    const masters: string[] = [];
+    let offset = 0;
+    while (offset + 6 <= data.length) {
+      const type = data.toString("ascii", offset, offset + 4);
+      const size = data.readUInt16LE(offset + 4);
+      const fieldStart = offset + 6;
+      if (fieldStart + size > data.length) {
+        break;
+      }
+      if (type === "MAST") {
+        let end = fieldStart;
+        while (end < fieldStart + size && data[end] !== 0) {
+          end++;
+        }
+        masters.push(data.toString("ascii", fieldStart, end));
+      }
+      offset = fieldStart + size;
+    }
+    return masters;
+  } finally {
+    await handle.close();
+  }
+}
+
+export interface MissingMastersEntry {
+  plugin: string;
+  missingMasters: string[];
+}
+
+/**
+ * Finds enabled plugins whose master files aren't themselves enabled — reads each
+ * plugin's real TES4 header from the game's Data folder rather than trusting any
+ * Vortex-side bookkeeping, since Vortex doesn't expose a "resolved masters" selector.
+ * A very common real troubleshooting need (a patch enabled without its base mod).
+ */
+export async function findMissingMasters(
+  api: IExtensionApi,
+  gameId?: string,
+): Promise<MissingMastersEntry[]> {
+  const st = state(api);
+  const targetGameId = gameId ?? selectors.activeGameId(st);
+  if (!targetGameId) {
+    throw new Error("No active game and no gameId provided");
+  }
+  const gamePath = queryStatePath(api, [
+    "settings",
+    "gameMode",
+    "discovered",
+    targetGameId,
+    "path",
+  ]) as string | undefined;
+  if (gamePath === undefined) {
+    throw new Error(`Game ${targetGameId} is not discovered (no installation path known).`);
+  }
+  const dataDir = path.join(gamePath, "Data");
+  const loadOrder = listLoadOrder(api);
+  const enabledPlugins = loadOrder.filter((entry) => entry.enabled).map((entry) => entry.plugin);
+  const enabledSet = new Set(enabledPlugins.map((plugin) => plugin.toLowerCase()));
+
+  const results: MissingMastersEntry[] = [];
+  await Promise.all(
+    enabledPlugins.map(async (plugin) => {
+      const masters = await readPluginMasters(path.join(dataDir, plugin)).catch(() => []);
+      const missing = masters.filter((master) => !enabledSet.has(master.toLowerCase()));
+      if (missing.length > 0) {
+        results.push({ plugin, missingMasters: missing });
+      }
+    }),
+  );
+  results.sort((a, b) => a.plugin.localeCompare(b.plugin));
+  return results;
 }
