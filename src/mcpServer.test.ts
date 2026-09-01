@@ -30,6 +30,7 @@ vi.mock("./vortexControl", () => ({
   listDownloads: vi.fn(() => []),
   listNotifications: vi.fn(() => []),
   listModRules: vi.fn(() => []),
+  listDialogs: vi.fn(() => []),
   setModsEnabled: vi.fn(async () => undefined),
   deployMods: vi.fn(async () => undefined),
   purgeMods: vi.fn(async () => undefined),
@@ -148,6 +149,7 @@ describe("mcpServer HTTP gating", () => {
         "list_downloads",
         "list_notifications",
         "list_mod_rules",
+        "list_dialogs",
       ]),
     );
     expect(names).not.toEqual(

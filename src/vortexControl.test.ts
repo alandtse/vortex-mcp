@@ -10,6 +10,10 @@ vi.mock("@nexusmods/vortex-api", () => ({
     setLoadOrder: vi.fn((order: unknown) => ({ type: "SET_LOAD_ORDER", payload: order })),
     setGamePath: vi.fn((gamePath: unknown) => ({ type: "SET_GAME_PATH", payload: gamePath })),
     removeProfile: vi.fn((profileId: string) => ({ type: "REMOVE_PROFILE", payload: profileId })),
+    closeDialog: vi.fn(
+      (id: string, actionKey?: string) => (dispatch: (a: unknown) => void) =>
+        dispatch({ type: "CLOSE_DIALOG_THUNK_RAN", id, actionKey }),
+    ),
   },
   selectors: {
     activeProfileId: vi.fn<() => string | undefined>(),
@@ -48,6 +52,7 @@ import {
   dispatchAction,
   installModFromUrl,
   listCategories,
+  listDialogs,
   listDownloads,
   listLoadOrder,
   listModRules,
@@ -503,6 +508,26 @@ describe("vortexControl: dispatchAction", () => {
     expect(actions.removeProfile).toHaveBeenCalledWith("clone-id");
     expect(result).toEqual({ type: "REMOVE_PROFILE", payload: "clone-id" });
   });
+
+  it("dispatches a thunk-returning action (closeDialog) directly, not as a {type} object", () => {
+    const dispatch = vi.fn();
+
+    const result = dispatchAction(fakeApi({ dispatch }), "closeDialog", ["d1", "Ignore"]);
+
+    expect(actions.closeDialog).toHaveBeenCalledWith("d1", "Ignore");
+    // The thunk itself was handed to dispatch (redux-thunk middleware's job to run it) —
+    // simulate that here to confirm it's the real thunk, not something pre-invoked.
+    expect(dispatch).toHaveBeenCalledWith(expect.any(Function));
+    const thunk = dispatch.mock.calls[0][0] as (fn: (a: unknown) => void) => void;
+    const innerDispatch = vi.fn();
+    thunk(innerDispatch);
+    expect(innerDispatch).toHaveBeenCalledWith({
+      type: "CLOSE_DIALOG_THUNK_RAN",
+      id: "d1",
+      actionKey: "Ignore",
+    });
+    expect(result).toEqual({ dispatched: "closeDialog", thunk: true });
+  });
 });
 
 describe("vortexControl: backupState", () => {
@@ -617,6 +642,50 @@ describe("vortexControl: listNotifications", () => {
       { id: "n1", type: "error", title: "Deployment failed", message: "Permission denied" },
       { id: undefined, type: "info", title: undefined, message: "No title here" },
     ]);
+  });
+});
+
+describe("vortexControl: listDialogs", () => {
+  it("flattens a dialog's content and surfaces the exact action labels to pick from", () => {
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      session: {
+        notifications: {
+          dialogs: [
+            {
+              id: "d1",
+              type: "question",
+              title: "Files changed",
+              content: { message: "Some files changed outside Vortex." },
+              actions: ["Ignore", "Keep changes"],
+              defaultAction: "Ignore",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(listDialogs(api)).toEqual([
+      {
+        id: "d1",
+        type: "question",
+        title: "Files changed",
+        message: "Some files changed outside Vortex.",
+        actions: ["Ignore", "Keep changes"],
+        defaultAction: "Ignore",
+        checkboxes: undefined,
+        input: undefined,
+      },
+    ]);
+  });
+
+  it("returns an empty array when no dialog is open", () => {
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      session: { notifications: { dialogs: [] } },
+    });
+
+    expect(listDialogs(api)).toEqual([]);
   });
 });
 

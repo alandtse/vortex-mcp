@@ -218,6 +218,23 @@ const DISPATCHABLE_ACTIONS = new Map<string, string>([
   ["removeDownloadSilent", "id: string"],
   ["setDownloadInstalled", "id: string, gameId: string, modId: string"],
   ["setDownloadInterrupted", "id: string, realReceived: number"],
+  [
+    "closeDialog",
+    "id: string, actionKey?: string, input?: unknown " +
+      "(actionKey must be one of the dialog's own `actions` labels — read via list_dialogs " +
+      "first, never guess; input is only meaningful for a dialog with checkboxes/input " +
+      "fields, e.g. { checkbox-id: true } or { input-id: 'value' })",
+  ],
+  [
+    "closeDialogs",
+    "ids: string[], actionKey?: string, input?: unknown (same semantics as closeDialog, " +
+      "applied to multiple dialogs at once)",
+  ],
+  [
+    "showDialog",
+    "type: 'success'|'info'|'error'|'question', title: string, content: IDialogContent " +
+      "(e.g. { message: 'text' }), actions: {label: string, default?: boolean}[], id?: string",
+  ],
 ]);
 
 /**
@@ -237,6 +254,15 @@ export function dispatchAction(api: IExtensionApi, name: string, args: unknown[]
     throw new Error(`Unknown action: ${name}.`);
   }
   const result = (fn as (...fnArgs: unknown[]) => unknown)(...args);
+  // Most allowlisted actions are plain redux-act action creators returning {type, payload}.
+  // A few (closeDialog, closeDialogs, showDialog) are thunks — plain functions taking
+  // (dispatch, getState) — since Vortex uses redux-thunk middleware, dispatching the
+  // function itself (not a {type} object) is the correct call; there's no natural
+  // {type, payload} to report back for these, so the response just confirms what ran.
+  if (typeof result === "function") {
+    store(api).dispatch(result as (...fnArgs: unknown[]) => unknown);
+    return { dispatched: name, thunk: true };
+  }
   if (
     result === null ||
     typeof result !== "object" ||
@@ -494,6 +520,55 @@ export function listNotifications(api: IExtensionApi): NotificationSummary[] {
   const st = state(api);
   const notifications = selectors.notifications(st) as types.INotification[];
   return notifications.map((n) => ({ id: n.id, type: n.type, title: n.title, message: n.message }));
+}
+
+export interface DialogSummary {
+  id: string;
+  type: string;
+  title: string;
+  /** Flattened from content.message/text/bbcode/md/htmlText, whichever is set. */
+  message?: string;
+  /** The exact labels closeDialog's `actionKey` must match — read this, don't guess. */
+  actions: string[];
+  defaultAction?: string;
+  checkboxes?: { id: string; text?: string; value: boolean }[];
+  input?: { id: string; label?: string; value?: string }[];
+}
+
+/**
+ * Lists Vortex's currently-open modal dialogs (context.api.showDialog), e.g. the
+ * "files changed outside Vortex" prompt that can block a deploy. Distinct from
+ * list_notifications' toast notifications — same INotificationState slice
+ * (state.session.notifications), different field (`dialogs`, confirmed live: not
+ * documented anywhere as a state path, only found by tracing IDialog's declared
+ * home through @nexusmods/vortex-api's types). Use closeDialog via vortex_dispatch
+ * to respond, picking one of this dialog's own `actions` labels.
+ */
+export function listDialogs(api: IExtensionApi): DialogSummary[] {
+  const dialogs =
+    (queryStatePath(api, ["session", "notifications", "dialogs"]) as types.IDialog[] | undefined) ??
+    [];
+  return dialogs.map((d) => {
+    const content = d.content as {
+      message?: string;
+      text?: string;
+      bbcode?: string;
+      md?: string;
+      htmlText?: string;
+      checkboxes?: { id: string; text?: string; value: boolean }[];
+      input?: { id: string; label?: string; value?: string }[];
+    };
+    return {
+      id: d.id,
+      type: d.type,
+      title: d.title,
+      message: content.message ?? content.text ?? content.bbcode ?? content.md ?? content.htmlText,
+      actions: d.actions,
+      defaultAction: d.defaultAction,
+      checkboxes: content.checkboxes,
+      input: content.input,
+    };
+  });
 }
 
 export interface ModRuleSummary {

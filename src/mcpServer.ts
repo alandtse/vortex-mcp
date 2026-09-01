@@ -180,6 +180,22 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
       content: [jsonText(control.listModRules(api, modId, gameId))],
     }),
   );
+
+  server.registerTool(
+    "list_dialogs",
+    {
+      description:
+        "List Vortex's currently-open modal dialogs (e.g. a 'files changed outside " +
+        "Vortex' prompt that can block a deploy) — distinct from list_notifications' " +
+        "toast notifications. Each entry's `actions` array is the exact set of labels " +
+        "closeDialog's actionKey must match (via vortex_dispatch) — read this before " +
+        "responding, never guess a choice.",
+      inputSchema: z.object({}),
+    },
+    async () => ({
+      content: [jsonText(control.listDialogs(api))],
+    }),
+  );
 }
 
 function registerWriteTools(server: McpServer, api: IExtensionApi): void {
