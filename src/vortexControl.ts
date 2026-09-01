@@ -1223,3 +1223,95 @@ export function listKnownModConflicts(
   }
   return matches;
 }
+
+export interface DeploymentDiscrepancy {
+  plugin: string;
+  /** Whether Vortex's active-profile load order has this plugin enabled. */
+  vortexEnabled: boolean;
+  /** Whether the plugin file actually exists in the game's Data folder. */
+  existsInDataFolder: boolean;
+  /** Whether the game's own plugins.txt marks this plugin active (the "*" prefix). */
+  activeInPluginsTxt: boolean;
+}
+
+/**
+ * Finds plugins where Vortex's load-order state, what's actually deployed to the game's
+ * Data folder, and what the game's own plugins.txt says is active all disagree — reads
+ * both real files directly rather than trusting Vortex's in-memory state alone, since a
+ * deploy can silently partially fail. Reports raw discrepancies only (all three booleans
+ * per entry), no verdict about which one is "right" — matches list_file_conflicts'
+ * stance. Only supports games with a verified save-data folder name (see MY_GAMES_FOLDER).
+ */
+export async function findMissingDeployedFiles(
+  api: IExtensionApi,
+  gameId?: string,
+): Promise<DeploymentDiscrepancy[]> {
+  const st = state(api);
+  const targetGameId = gameId ?? selectors.activeGameId(st);
+  if (!targetGameId) {
+    throw new Error("No active game and no gameId provided");
+  }
+  const myGamesFolder = MY_GAMES_FOLDER[targetGameId];
+  if (myGamesFolder === undefined) {
+    throw new Error(
+      `Don't know the save-data folder name for ${targetGameId}. Supported: ` +
+        Object.keys(MY_GAMES_FOLDER).join(", "),
+    );
+  }
+  const gamePath = queryStatePath(api, [
+    "settings",
+    "gameMode",
+    "discovered",
+    targetGameId,
+    "path",
+  ]) as string | undefined;
+  if (gamePath === undefined) {
+    throw new Error(`Game ${targetGameId} is not discovered (no installation path known).`);
+  }
+  const dataDir = path.join(gamePath, "Data");
+  const documentsPath = util.getVortexPath("documents");
+  const pluginsTxtPath = path.join(documentsPath, "My Games", myGamesFolder, "plugins.txt");
+
+  const pluginsTxtActive = new Map<string, { active: boolean; displayName: string }>();
+  try {
+    const content = await readFile(pluginsTxtPath, "utf8");
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (line.length === 0 || line.startsWith("#")) {
+        continue;
+      }
+      const active = line.startsWith("*");
+      const plugin = active ? line.slice(1) : line;
+      pluginsTxtActive.set(plugin.toLowerCase(), { active, displayName: plugin });
+    }
+  } catch {
+    // No plugins.txt yet (never deployed/launched) — every plugin will show as inactive.
+  }
+
+  const loadOrder = listLoadOrder(api);
+  const loadOrderByLower = new Map(loadOrder.map((entry) => [entry.plugin.toLowerCase(), entry]));
+  const pluginKeysLower = new Set([...loadOrderByLower.keys(), ...pluginsTxtActive.keys()]);
+
+  const discrepancies: DeploymentDiscrepancy[] = [];
+  await Promise.all(
+    [...pluginKeysLower].map(async (key) => {
+      const loadOrderEntry = loadOrderByLower.get(key);
+      const txtEntry = pluginsTxtActive.get(key);
+      const plugin = loadOrderEntry?.plugin ?? txtEntry?.displayName ?? key;
+      const vortexEnabled = loadOrderEntry?.enabled ?? false;
+      const activeInPluginsTxt = txtEntry?.active ?? false;
+      const existsInDataFolder = await stat(path.join(dataDir, plugin))
+        .then((s) => s.isFile())
+        .catch(() => false);
+      if (
+        vortexEnabled !== existsInDataFolder ||
+        vortexEnabled !== activeInPluginsTxt ||
+        existsInDataFolder !== activeInPluginsTxt
+      ) {
+        discrepancies.push({ plugin, vortexEnabled, existsInDataFolder, activeInPluginsTxt });
+      }
+    }),
+  );
+  discrepancies.sort((a, b) => a.plugin.localeCompare(b.plugin));
+  return discrepancies;
+}

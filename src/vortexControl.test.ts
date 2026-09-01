@@ -52,6 +52,7 @@ import {
   deployMods,
   describeApi,
   dispatchAction,
+  findMissingDeployedFiles,
   findMissingMasters,
   findModByFile,
   installModFromUrl,
@@ -1295,5 +1296,85 @@ describe("vortexControl: listKnownModConflicts", () => {
     });
 
     expect(listKnownModConflicts(api)).toEqual([]);
+  });
+});
+
+describe("vortexControl: findMissingDeployedFiles", () => {
+  let gameRoot: string;
+  let docsRoot: string;
+
+  beforeEach(async () => {
+    gameRoot = await mkdtemp(path.join(os.tmpdir(), "vortex-mcp-test-game-"));
+    docsRoot = await mkdtemp(path.join(os.tmpdir(), "vortex-mcp-test-docs2-"));
+    await mkdir(path.join(gameRoot, "Data"), { recursive: true });
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    vi.mocked(util.getVortexPath).mockReturnValue(docsRoot);
+  });
+
+  afterEach(async () => {
+    await rm(gameRoot, { recursive: true, force: true });
+    await rm(docsRoot, { recursive: true, force: true });
+  });
+
+  function apiWithLoadOrder(loadOrder: Record<string, { loadOrder: number; enabled: boolean }>) {
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      settings: { gameMode: { discovered: { skyrimse: { path: gameRoot } } } },
+      loadOrder,
+    });
+    return api;
+  }
+
+  async function writePluginsTxt(lines: string[]): Promise<void> {
+    const dir = path.join(docsRoot, "My Games", "Skyrim Special Edition");
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "plugins.txt"), lines.join("\r\n"));
+  }
+
+  it("flags a plugin Vortex thinks is enabled but was never actually deployed", async () => {
+    // Skyrim.esm: consistently enabled everywhere -- no discrepancy.
+    await writeFile(path.join(gameRoot, "Data", "Skyrim.esm"), "x");
+    await writePluginsTxt(["*Skyrim.esm", "Missing.esp"]);
+    const api = apiWithLoadOrder({
+      "Skyrim.esm": { loadOrder: 0, enabled: true },
+      "Missing.esp": { loadOrder: 1, enabled: true },
+    });
+
+    const result = await findMissingDeployedFiles(api);
+
+    expect(result).toEqual([
+      {
+        plugin: "Missing.esp",
+        vortexEnabled: true,
+        existsInDataFolder: false,
+        activeInPluginsTxt: false,
+      },
+    ]);
+  });
+
+  it("reports nothing when Vortex, the Data folder, and plugins.txt all agree", async () => {
+    await writeFile(path.join(gameRoot, "Data", "Skyrim.esm"), "x");
+    await writePluginsTxt(["*Skyrim.esm"]);
+    const api = apiWithLoadOrder({ "Skyrim.esm": { loadOrder: 0, enabled: true } });
+
+    expect(await findMissingDeployedFiles(api)).toEqual([]);
+  });
+
+  it("flags a plugin active in plugins.txt that Vortex doesn't know about", async () => {
+    await writeFile(path.join(gameRoot, "Data", "Skyrim.esm"), "x");
+    await writeFile(path.join(gameRoot, "Data", "Orphan.esp"), "x");
+    await writePluginsTxt(["*Skyrim.esm", "*Orphan.esp"]);
+    const api = apiWithLoadOrder({ "Skyrim.esm": { loadOrder: 0, enabled: true } });
+
+    const result = await findMissingDeployedFiles(api);
+
+    expect(result).toEqual([
+      {
+        plugin: "Orphan.esp",
+        vortexEnabled: false,
+        existsInDataFolder: true,
+        activeInPluginsTxt: true,
+      },
+    ]);
   });
 });

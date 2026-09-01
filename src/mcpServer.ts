@@ -324,6 +324,26 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "find_missing_deployed_files",
+    {
+      description:
+        "Find plugins where Vortex's load-order state, what's actually deployed to the " +
+        "game's Data folder, and what the game's own plugins.txt says is active all " +
+        "disagree — reads both real files directly rather than trusting Vortex's " +
+        "in-memory state alone, since a deploy can silently partially fail. Reports raw " +
+        "discrepancies only (all three booleans per entry), no verdict about which one " +
+        "is 'right'. Only supports games with a verified save-data folder name " +
+        "(currently skyrimse, skyrimvr).",
+      inputSchema: z.object({
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+      }),
+    },
+    async ({ gameId }) => ({
+      content: [jsonText(await control.findMissingDeployedFiles(api, gameId))],
+    }),
+  );
+
+  server.registerTool(
     "list_dialogs",
     {
       description:
