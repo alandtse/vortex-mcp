@@ -82,6 +82,7 @@ hand-transcribed, so it can't silently drift from the code.
 | `list_downloads`       | read   | List the download queue/history for a game (defaults to the active game): name, state, progress percent, size — a formatted view raw vortex… |
 | `list_notifications`   | read   | List Vortex's current notifications (errors, warnings, info) — what Vortex itself is currently flagging as a problem, useful for diagnosing… |
 | `list_mod_rules`       | read   | List a mod's dependency/conflict rules (before/after/requires/conflicts/...), resolving each reference to the target mod's friendly name wh… |
+| `list_dialogs`         | read   | List Vortex's currently-open modal dialogs (e.g. a 'files changed outside Vortex' prompt that can block a deploy) — distinct from list_noti… |
 | `switch_profile`       | write  | Switch Vortex to a different profile by id.                                                                                                  |
 | `clone_profile`        | write  | Clone an existing profile into a new one (copies its on-disk profile directory — load order, ini tweaks — plus its mod enabled-state), the…  |
 | `vortex_dispatch`      | write  | Dispatch a named, allowlisted Vortex action creator — mod metadata/rules, categories, load order, deployment settings, download bookkeeping. |
@@ -188,8 +189,8 @@ same-origin.
 
 **Writes fail closed on `VORTEX_MCP_TOKEN`.** With no token set, only the
 read tools (`vortex_describe`, `vortex_query`, `list_mods`, `list_load_order`,
-`list_categories`, `list_downloads`, `list_notifications`, `list_mod_rules`)
-are ever registered — none of the ten write tools
+`list_categories`, `list_downloads`, `list_notifications`, `list_mod_rules`,
+`list_dialogs`) are ever registered — none of the ten write tools
 (`switch_profile`, `clone_profile`, `vortex_dispatch`, `backup_state`,
 `set_mods_enabled`, `deploy_mods`, `purge_mods`, `install_mod_from_url`,
 `activate_game`, `vortex_restart`) exist to call. Set `VORTEX_MCP_TOKEN` to

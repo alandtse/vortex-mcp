@@ -29,6 +29,7 @@ const ACCESS_TIER = {
   list_downloads: "read",
   list_notifications: "read",
   list_mod_rules: "read",
+  list_dialogs: "read",
   switch_profile: "write",
   clone_profile: "write",
   vortex_dispatch: "write",
