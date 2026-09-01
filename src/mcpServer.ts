@@ -37,16 +37,17 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
     {
       description:
         "Discover the live Vortex API surface: callable selector names (for vortex_query), " +
-        "every action/api.ext function name dispatchable via vortex_dispatch (`actions`/" +
-        "`extensionApis` — all of these are callable, no allowlist; the loopback bind + " +
-        "bearer token is the real security boundary), with real positional argument order " +
-        "for the ones this project has verified (`dispatchHints`/`extensionApiHints`, e.g. " +
-        'dispatchHints.setModEnabled = "profileId: string, modId: string, enable: boolean" ' +
-        "— missing from these maps just means no pre-verified arg order, not that it's " +
-        "unavailable), and top-level Redux state keys (for vortex_query's path mode, " +
-        "includes state added by any loaded extension, not just core Vortex). Reflects " +
-        "whatever Vortex is actually running right now — new selectors/actions/state show " +
-        "up here without an extension rebuild.",
+        "every action/api.ext function/event/api method name dispatchable via vortex_dispatch " +
+        "(`actions`/`extensionApis`/`eventNames`/`apiMethods` — all of these are callable, no " +
+        "allowlist; the loopback bind + bearer token is the real security boundary), with real " +
+        "positional argument order for the ones this project has verified (`dispatchHints`/" +
+        '`extensionApiHints`/`eventHints`, e.g. dispatchHints.setModEnabled = "profileId: ' +
+        'string, modId: string, enable: boolean" — missing from these maps just means no ' +
+        "pre-verified arg order, not that it's unavailable; eventHints also documents the " +
+        '"__CALLBACK__" sentinel position for the few events that need one), and top-level ' +
+        "Redux state keys (for vortex_query's path mode, includes state added by any loaded " +
+        "extension, not just core Vortex). Reflects whatever Vortex is actually running right " +
+        "now — new selectors/actions/events/state show up here without an extension rebuild.",
       inputSchema: z.object({}),
     },
     async () => ({
@@ -431,20 +432,31 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
     "vortex_dispatch",
     {
       description:
-        "Dispatch a named Vortex action creator, or — if the name isn't a Redux action — " +
-        "call a named api.ext function instead (e.g. action='nexusGetModInfo'). Not " +
-        "allowlisted: everything in vortex_describe's `actions`/`extensionApis` lists is " +
+        "Dispatch a named Vortex action creator, api.ext function, event, or direct api " +
+        "method — tried in that order. (1) Redux action creator (e.g. action='setModEnabled'). " +
+        "(2) api.ext function (e.g. action='nexusGetModInfo'). (3) a currently-registered " +
+        "event name, emitted via api.events.emit — most fire-and-forget by default; pass " +
+        '"__CALLBACK__" as one of the args at the position Vortex\'s own handler expects a ' +
+        "Node-style (err, result?) => void callback and vortex_dispatch will await real " +
+        "completion instead (e.g. action='deploy-mods', args=['__CALLBACK__'] resolves once " +
+        "deployment actually finishes, not just once it started). (4) a direct method on the " +
+        "api object itself (e.g. action='sendNotification'). Not allowlisted: everything in " +
+        "vortex_describe's `actions`/`extensionApis`/`eventNames`/`apiMethods` lists is " +
         "callable this way once you hold the write-tier token — that token, not a curated " +
-        "list, is the actual security boundary, matching what a human at Vortex's own UI " +
-        "can already do. Use vortex_describe's `dispatchHints`/`extensionApiHints` for the " +
-        "real argument order where this project has verified one; for anything else, check " +
-        "Vortex's source or test carefully with a state read before/after.",
+        "list, is the actual security boundary, matching what a human at Vortex's own UI can " +
+        "already do. Use vortex_describe's `dispatchHints`/`extensionApiHints`/`eventHints` " +
+        "for the real argument order (incl. the __CALLBACK__ position) where this project has " +
+        "verified one; for anything else, check Vortex's source or test carefully with a " +
+        "state read before/after.",
       inputSchema: z.object({
-        action: z.string().describe("Action creator name or api.ext function name"),
+        action: z.string().describe("Action creator, api.ext function, event, or api method name"),
         args: z
           .array(z.unknown())
           .optional()
-          .describe("Positional arguments for the action creator or api.ext function"),
+          .describe(
+            "Positional arguments for the action creator/function/event/method " +
+              '(include "__CALLBACK__" at the callback position to await a callback-based event)',
+          ),
       }),
     },
     async ({ action, args }) => {
@@ -493,55 +505,6 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
           { type: "text", text: `${enabled ? "Enabled" : "Disabled"} ${modIds.length} mod(s)` },
         ],
       };
-    },
-  );
-
-  server.registerTool(
-    "deploy_mods",
-    {
-      description: "Deploy currently enabled mods for the active profile.",
-      inputSchema: z.object({}),
-    },
-    async () => {
-      await control.deployMods(api);
-      return { content: [{ type: "text", text: "Deployment complete" }] };
-    },
-  );
-
-  server.registerTool(
-    "purge_mods",
-    {
-      description: "Purge (undeploy) all deployed mod files for the active profile.",
-      inputSchema: z.object({ allowFallback: z.boolean().optional().default(false) }),
-    },
-    async ({ allowFallback }) => {
-      await control.purgeMods(api, allowFallback);
-      return { content: [{ type: "text", text: "Purge complete" }] };
-    },
-  );
-
-  server.registerTool(
-    "install_mod_from_url",
-    {
-      description:
-        "Download and install a mod from a URL (e.g. an nxm:// link or direct download URL).",
-      inputSchema: z.object({ url: z.url() }),
-    },
-    async ({ url }) => {
-      const downloadId = await control.installModFromUrl(api, url);
-      return { content: [{ type: "text", text: `Download started: ${downloadId}` }] };
-    },
-  );
-
-  server.registerTool(
-    "activate_game",
-    {
-      description: "Switch Vortex's active game mode.",
-      inputSchema: z.object({ gameId: z.string() }),
-    },
-    async ({ gameId }) => {
-      control.activateGame(api, gameId);
-      return { content: [{ type: "text", text: `Activated game ${gameId}` }] };
     },
   );
 

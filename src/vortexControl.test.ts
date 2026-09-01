@@ -46,17 +46,14 @@ vi.mock("@nexusmods/vortex-api", () => ({
 
 import { actions, fs, selectors, util } from "@nexusmods/vortex-api";
 import {
-  activateGame,
   backupState,
   checkNexusModUpdates,
   cloneProfile,
-  deployMods,
   describeApi,
   dispatchAction,
   findMissingDeployedFiles,
   findMissingMasters,
   findModByFile,
-  installModFromUrl,
   launchGame,
   listCategories,
   listDialogs,
@@ -69,7 +66,6 @@ import {
   listMods,
   listNotifications,
   listRuntimeErrors,
-  purgeMods,
   queryStatePath,
   querySelector,
   restartVortex,
@@ -112,6 +108,7 @@ describe("vortexControl: reflection", () => {
     expect(result.dispatchHints).not.toHaveProperty("setNextProfile");
     expect(result.extensionApis).toEqual([]);
     expect(result.extensionApiHints.nexusGetModInfo).toContain("gameId: string");
+    expect(result.eventHints["deploy-mods"]).toContain("__CALLBACK__");
   });
 
   it("describeApi surfaces api.ext names as extensionApis without exposing the functions", () => {
@@ -415,71 +412,7 @@ describe("vortexControl: listCategories", () => {
   });
 });
 
-describe("vortexControl: deploy/purge/install", () => {
-  it("deployMods resolves when the deploy-mods callback reports no error", async () => {
-    const emit = vi.fn((event: string, cb: (err: Error | null) => void) => {
-      expect(event).toBe("deploy-mods");
-      cb(null);
-    });
-
-    await expect(deployMods(fakeApi({ emit }))).resolves.toBeUndefined();
-  });
-
-  it("deployMods rejects when the deploy-mods callback reports an error", async () => {
-    const emit = vi.fn((_event: string, cb: (err: Error | null) => void) => cb(new Error("boom")));
-
-    await expect(deployMods(fakeApi({ emit }))).rejects.toThrow("boom");
-  });
-
-  it("purgeMods passes allowFallback through to the purge-mods event", async () => {
-    const emit = vi.fn((event: string, allowFallback: boolean, cb: (err: Error | null) => void) => {
-      expect(event).toBe("purge-mods");
-      expect(allowFallback).toBe(true);
-      cb(null);
-    });
-
-    await expect(purgeMods(fakeApi({ emit }), true)).resolves.toBeUndefined();
-  });
-
-  it("installModFromUrl resolves with the download id from start-download", async () => {
-    const emit = vi.fn(
-      (
-        event: string,
-        urls: string[],
-        _modInfo: unknown,
-        _fileName: unknown,
-        cb: (err: Error | null, id?: string) => void,
-      ) => {
-        expect(event).toBe("start-download");
-        expect(urls).toEqual(["https://example.com/mod.zip"]);
-        cb(null, "download-42");
-      },
-    );
-
-    await expect(installModFromUrl(fakeApi({ emit }), "https://example.com/mod.zip")).resolves.toBe(
-      "download-42",
-    );
-  });
-});
-
 describe("vortexControl: games", () => {
-  it("activateGame throws for an unknown game id without emitting", () => {
-    vi.mocked(selectors.knownGames).mockReturnValue([{ id: "skyrimse" } as never]);
-    const emit = vi.fn();
-
-    expect(() => activateGame(fakeApi({ emit }), "unknown-game")).toThrow(/Unknown game/);
-    expect(emit).not.toHaveBeenCalled();
-  });
-
-  it("activateGame emits activate-game for a known game id", () => {
-    vi.mocked(selectors.knownGames).mockReturnValue([{ id: "skyrimse" } as never]);
-    const emit = vi.fn();
-
-    activateGame(fakeApi({ emit }), "skyrimse");
-
-    expect(emit).toHaveBeenCalledWith("activate-game", "skyrimse");
-  });
-
   it("launchGame resolves the primary tool via settings.interface/gameMode.discovered and runs it", async () => {
     vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
     const api = fakeApi();
@@ -588,7 +521,58 @@ describe("vortexControl: dispatchAction", () => {
     expect(result).toEqual({ name: "Cool Mod" });
   });
 
-  it("rejects a name that's neither a known action nor an api.ext function", async () => {
+  it("falls back to firing a registered event when the name isn't an action or api.ext function", async () => {
+    const emit = vi.fn();
+    const api = fakeApi({ emit });
+    (api as unknown as { ext: Record<string, unknown> }).ext = {};
+    vi.mocked(
+      (api as unknown as { events: { eventNames: () => string[] } }).events.eventNames,
+    ).mockReturnValue(["activate-game"]);
+
+    const result = await dispatchAction(api, "activate-game", ["skyrimse"]);
+
+    expect(emit).toHaveBeenCalledWith("activate-game", "skyrimse");
+    expect(result).toEqual({ emitted: "activate-game" });
+  });
+
+  it("awaits a callback-based event when __CALLBACK__ is in the args", async () => {
+    const emit = vi.fn((event: string, cb: (err: Error | null) => void) => {
+      expect(event).toBe("deploy-mods");
+      cb(null);
+    });
+    const api = fakeApi({ emit });
+    (api as unknown as { ext: Record<string, unknown> }).ext = {};
+    vi.mocked(
+      (api as unknown as { events: { eventNames: () => string[] } }).events.eventNames,
+    ).mockReturnValue(["deploy-mods"]);
+
+    await expect(dispatchAction(api, "deploy-mods", ["__CALLBACK__"])).resolves.toBeUndefined();
+  });
+
+  it("rejects a callback-based event whose callback reports an error", async () => {
+    const emit = vi.fn((_event: string, cb: (err: Error | null) => void) => cb(new Error("boom")));
+    const api = fakeApi({ emit });
+    (api as unknown as { ext: Record<string, unknown> }).ext = {};
+    vi.mocked(
+      (api as unknown as { events: { eventNames: () => string[] } }).events.eventNames,
+    ).mockReturnValue(["deploy-mods"]);
+
+    await expect(dispatchAction(api, "deploy-mods", ["__CALLBACK__"])).rejects.toThrow("boom");
+  });
+
+  it("falls back to a direct method on the api object itself", async () => {
+    const sendNotification = vi.fn(() => "notif-id");
+    const api = fakeApi();
+    (api as unknown as { ext: Record<string, unknown> }).ext = {};
+    (api as unknown as { sendNotification: unknown }).sendNotification = sendNotification;
+
+    const result = await dispatchAction(api, "sendNotification", [{ message: "hi" }]);
+
+    expect(sendNotification).toHaveBeenCalledWith({ message: "hi" });
+    expect(result).toBe("notif-id");
+  });
+
+  it("rejects a name that's neither a known action, api.ext function, event, nor api method", async () => {
     const api = fakeApi();
     (api as unknown as { ext: Record<string, unknown> }).ext = {};
 

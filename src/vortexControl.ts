@@ -117,21 +117,23 @@ export interface ApiDescription {
    * Direct method names on the live IExtensionApi instance (api.foo(...)) — distinct
    * from selectors/actions/extensionApis. This is how a real capability gap got found:
    * runExecutable (launching a game/tool) is one of these, not a Redux action or an
-   * api.ext export, so nothing in the other three lists would ever surface it.
-   * Informational only — no generic caller reaches these (arbitrary signatures, and
-   * several are UI-only pickers with no headless meaning). A specific one becomes a
-   * dedicated tool (see launch_game) once it's confirmed live, not guessed from the type
-   * declaration.
+   * api.ext export, so nothing in the other three lists would ever surface it. All of
+   * these are dispatchable via vortex_dispatch too (same token boundary) — a few are
+   * UI-only pickers (selectDir/selectFile/selectExecutable) or register a persistent
+   * callback (onStateChange) that won't produce a useful result over a stateless HTTP
+   * call; calling those will likely hang or no-op rather than error outright.
    */
   apiMethods: string[];
   /**
    * Event names api.events.emit(name, ...args) can trigger, discovered from
-   * currently-registered listeners (api.events.eventNames()) rather than hardcoded —
-   * the same underlying mechanism deploy_mods/purge_mods/install_mod_from_url already
-   * use (deploy-mods/purge-mods/start-download), just made naturally discoverable
-   * instead of requiring a source read to find the next one.
+   * currently-registered listeners (api.events.eventNames()) rather than hardcoded. All
+   * of these are dispatchable via vortex_dispatch too — see eventHints for the
+   * CALLBACK_SENTINEL convention needed to await actual completion on the few that use a
+   * callback, rather than just firing.
    */
   eventNames: string[];
+  /** Positional argument order (incl. CALLBACK_SENTINEL position) for the eventNames entries this project has verified. */
+  eventHints: Record<string, string>;
 }
 
 export function describeApi(api: IExtensionApi): ApiDescription {
@@ -151,6 +153,7 @@ export function describeApi(api: IExtensionApi): ApiDescription {
       .eventNames()
       .filter((name): name is string => typeof name === "string")
       .toSorted(),
+    eventHints: Object.fromEntries(EVENT_HINTS),
   };
 }
 
@@ -275,12 +278,70 @@ const ACTION_HINTS = new Map<string, string>([
   ],
 ]);
 
+// Positional args for an event dispatched through the `events` fallback below can
+// include this literal string at the exact position where Vortex's own event handler
+// expects a Node-style (err, result?) callback — e.g. api.events.emit("deploy-mods", cb).
+// dispatchAction replaces it with a real callback and returns a promise that resolves/
+// rejects with whatever that callback receives, so the caller actually waits for
+// completion instead of just firing the event. Omit it entirely for a fire-and-forget
+// event (most of them — no callback convention at all).
+const CALLBACK_SENTINEL = "__CALLBACK__";
+
+// Real positional argument order (including the exact CALLBACK_SENTINEL position, for
+// the ones that use it) for the events this project has verified — same "documentation,
+// not a gate" role as ACTION_HINTS/EXTENSION_API_HINTS. Confirmed by what deploy_mods/
+// purge_mods/install_mod_from_url/activate_game (removed as dedicated tools once this
+// generic mechanism could fully express them) used to call directly.
+const EVENT_HINTS = new Map<string, string>([
+  [
+    "deploy-mods",
+    '"__CALLBACK__" — no other args. Resolves once deployment actually finishes ' +
+      "(not just once it started).",
+  ],
+  [
+    "purge-mods",
+    'allowFallback: boolean, "__CALLBACK__" — resolves once the purge actually finishes.',
+  ],
+  [
+    "start-download",
+    'urls: string[] (e.g. ["nxm://..."]), modInfo: object (e.g. {}), unused: null, ' +
+      '"__CALLBACK__" — resolves to the new download id. Can trigger a blocking ' +
+      '"choose install type" modal for ambiguous archives if the caller doesn\'t await ' +
+      "completion carefully — see list_dialogs/closeDialog.",
+  ],
+  [
+    "activate-game",
+    "gameId: string — fire-and-forget, no callback (omit the sentinel entirely). Vortex " +
+      "validates the id itself; an unknown gameId silently no-ops rather than throwing.",
+  ],
+]);
+
+async function dispatchEvent(api: IExtensionApi, name: string, args: unknown[]): Promise<unknown> {
+  const callbackIndex = args.indexOf(CALLBACK_SENTINEL);
+  if (callbackIndex === -1) {
+    api.events.emit(name, ...args);
+    return { emitted: name };
+  }
+  return new Promise((resolve, reject) => {
+    const realArgs = [...args];
+    realArgs[callbackIndex] = (err: unknown, result?: unknown) => {
+      if (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      } else {
+        resolve(result);
+      }
+    };
+    api.events.emit(name, ...realArgs);
+  });
+}
+
 /**
- * Dispatches a named Vortex action creator, or — if `name` isn't a Redux action — calls
- * a named api.ext function instead. Not allowlisted: every action and every api.ext
- * function is reachable this way, once the caller holds the write-tier bearer token (see
+ * Dispatches a named Vortex action creator, api.ext function, event, or direct api
+ * method — checked in that order. Not allowlisted: everything vortex_describe reflects
+ * is reachable this way, once the caller holds the write-tier bearer token (see
  * ACTION_HINTS's comment for why that token, not a second curated list, is the actual
- * security boundary).
+ * security boundary). Events need the CALLBACK_SENTINEL convention to await actual
+ * completion rather than just firing.
  */
 export async function dispatchAction(
   api: IExtensionApi,
@@ -315,8 +376,18 @@ export async function dispatchAction(
     return (extFn as (...fnArgs: unknown[]) => unknown)(...args);
   }
 
+  if (api.events.eventNames().includes(name)) {
+    return dispatchEvent(api, name, args);
+  }
+
+  const apiFn = (api as unknown as Record<string, unknown>)[name];
+  if (typeof apiFn === "function") {
+    return (apiFn as (...fnArgs: unknown[]) => unknown).apply(api, args);
+  }
+
   throw new Error(
-    `Unknown action or api.ext function: ${name}. Check vortex_describe's actions/extensionApis lists.`,
+    `Unknown action, api.ext function, event, or api method: ${name}. Check vortex_describe's ` +
+      "actions/extensionApis/eventNames/apiMethods lists.",
   );
 }
 
@@ -500,29 +571,6 @@ export async function setModsEnabled(
     throw new Error("No active profile and no profileId provided");
   }
   await actions.setModsEnabled(api, targetProfileId, modIds, enabled);
-}
-
-export async function deployMods(api: IExtensionApi): Promise<void> {
-  await util.toPromise<void>((cb) => api.events.emit("deploy-mods", cb));
-}
-
-export async function purgeMods(api: IExtensionApi, allowFallback = false): Promise<void> {
-  await util.toPromise<void>((cb) => api.events.emit("purge-mods", allowFallback, cb));
-}
-
-export async function installModFromUrl(api: IExtensionApi, url: string): Promise<string> {
-  return util.toPromise<string>((cb) =>
-    api.events.emit("start-download", [url], {}, undefined, cb),
-  );
-}
-
-export function activateGame(api: IExtensionApi, gameId: string): void {
-  const st = state(api);
-  if (selectors.knownGames(st).find((g: types.IGameStored) => g.id === gameId) === undefined) {
-    throw new Error(`Unknown game: ${gameId}`);
-  }
-  api.events.emit("activate-game", gameId);
-  log("info", "[vortex-mcp] activated game", { gameId });
 }
 
 interface DiscoveredTool {

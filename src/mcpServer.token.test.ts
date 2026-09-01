@@ -40,10 +40,6 @@ vi.mock("./vortexControl", () => ({
   checkNexusModUpdates: vi.fn(async () => ({ checkedCount: 0, updatedModIds: [] })),
   listFileConflicts: vi.fn(async () => []),
   setModsEnabled: vi.fn(async () => undefined),
-  deployMods: vi.fn(async () => undefined),
-  purgeMods: vi.fn(async () => undefined),
-  installModFromUrl: vi.fn(async () => "download-1"),
-  activateGame: vi.fn(),
   launchGame: vi.fn(async () => undefined),
   restartVortex: vi.fn(),
   dispatchAction: vi.fn(async () => ({ type: "NOOP" })),
@@ -146,15 +142,23 @@ describe("mcpServer bearer token gating", () => {
     const names = parseToolNames(res.body);
     expect(names).toEqual(
       expect.arrayContaining([
-        "purge_mods",
         "switch_profile",
         "clone_profile",
         "vortex_dispatch",
         "backup_state",
-        "install_mod_from_url",
-        "activate_game",
         "launch_game",
         "vortex_restart",
+      ]),
+    );
+    // deploy_mods/purge_mods/install_mod_from_url/activate_game were removed as dedicated
+    // tools once vortex_dispatch's event/apiMethods fallback tiers made them fully
+    // expressible generically (e.g. action="deploy-mods", args=["__CALLBACK__"]).
+    expect(names).not.toEqual(
+      expect.arrayContaining([
+        "deploy_mods",
+        "purge_mods",
+        "install_mod_from_url",
+        "activate_game",
       ]),
     );
   });
