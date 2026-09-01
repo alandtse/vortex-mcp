@@ -43,6 +43,7 @@ vi.mock("./vortexControl", () => ({
   launchGame: vi.fn(async () => undefined),
   restartVortex: vi.fn(),
   dispatchAction: vi.fn(async () => ({ type: "NOOP" })),
+  pollListener: vi.fn(() => ({ entries: [], lastSeq: 0 })),
   backupState: vi.fn(async () => "C:\\fake\\backup.json"),
 }));
 
@@ -145,6 +146,7 @@ describe("mcpServer bearer token gating", () => {
         "switch_profile",
         "clone_profile",
         "vortex_dispatch",
+        "poll_listener",
         "backup_state",
         "launch_game",
         "vortex_restart",

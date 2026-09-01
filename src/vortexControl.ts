@@ -119,9 +119,11 @@ export interface ApiDescription {
    * runExecutable (launching a game/tool) is one of these, not a Redux action or an
    * api.ext export, so nothing in the other three lists would ever surface it. All of
    * these are dispatchable via vortex_dispatch too (same token boundary) — a few are
-   * UI-only pickers (selectDir/selectFile/selectExecutable) or register a persistent
-   * callback (onStateChange) that won't produce a useful result over a stateless HTTP
-   * call; calling those will likely hang or no-op rather than error outright.
+   * UI-only pickers (selectDir/selectFile/selectExecutable); the ones that register a
+   * persistent listener (onStateChange, onAsync, registerProtocol,
+   * registerRepositoryLookup) go through a listenerId + poll_listener flow instead of
+   * returning a normal result — see listenerHints. withPrePost returns a wrapped
+   * function and isn't usefully dispatchable at all (see dispatchAction's error for it).
    */
   apiMethods: string[];
   /**
@@ -134,6 +136,12 @@ export interface ApiDescription {
   eventNames: string[];
   /** Positional argument order (incl. CALLBACK_SENTINEL position) for the eventNames entries this project has verified. */
   eventHints: Record<string, string>;
+  /**
+   * Positional argument order (incl. CALLBACK_SENTINEL position) for the apiMethods that
+   * register a persistent listener instead of returning a normal result — dispatching
+   * one of these returns { listenerId }; read what it's captured via poll_listener.
+   */
+  listenerHints: Record<string, string>;
 }
 
 export function describeApi(api: IExtensionApi): ApiDescription {
@@ -154,6 +162,9 @@ export function describeApi(api: IExtensionApi): ApiDescription {
       .filter((name): name is string => typeof name === "string")
       .toSorted(),
     eventHints: Object.fromEntries(EVENT_HINTS),
+    listenerHints: Object.fromEntries(
+      Object.entries(LISTENER_SPECS).map(([name, spec]) => [name, spec.hint]),
+    ),
   };
 }
 
@@ -335,13 +346,139 @@ async function dispatchEvent(api: IExtensionApi, name: string, args: unknown[]):
   });
 }
 
+// A handful of apiMethods don't perform an action — they register a real JS function as
+// a persistent listener (fires repeatedly, for the life of the Vortex process; none of
+// these expose a way to unregister). A function can't cross JSON-RPC, so — same
+// CALLBACK_SENTINEL convention as events — dispatchAction substitutes a real callback
+// that appends each firing to an in-process ring buffer and returns a listenerId
+// immediately, rather than trying to wait for or return "the result" of something that
+// keeps happening. Poll accumulated firings via poll_listener. `returns` is what the
+// substituted callback itself must hand back to satisfy the real API's contract (most
+// want nothing back; registerRepositoryLookup's callback must resolve to a lookup
+// result array, so ours always resolves empty since we're only capturing args here).
+const LISTENER_SPECS: Record<
+  string,
+  { returns: "void" | "promiseUndefined" | "promiseArray"; hint: string }
+> = {
+  onStateChange: {
+    returns: "void",
+    hint: 'path: string[], "__CALLBACK__" — fires with (previous, current) on every change to the given state path.',
+  },
+  onAsync: {
+    returns: "promiseUndefined",
+    hint: 'eventName: string, "__CALLBACK__" — fires with the event\'s own args each time eventName is emitted via emitAndAwait.',
+  },
+  registerProtocol: {
+    returns: "void",
+    hint: 'protocol: string, def: boolean, "__CALLBACK__" — fires with (url, install) when this protocol (e.g. an nxm:// link) is invoked.',
+  },
+  registerRepositoryLookup: {
+    returns: "promiseArray",
+    hint:
+      'repositoryId: string, preferOverMD5: boolean, "__CALLBACK__" — fires with the lookup id ' +
+      "when Vortex needs mod metadata for this repository; the real API expects the callback to " +
+      "resolve to lookup results, so ours always resolves [] (only args are captured here).",
+  },
+};
+
+const MAX_CONCURRENT_LISTENERS = 20;
+const MAX_BUFFER_ENTRIES_PER_LISTENER = 500;
+
+interface ListenerEntry {
+  seq: number;
+  args: unknown[];
+  receivedAt: number;
+}
+
+interface ListenerRecord {
+  name: string;
+  buffer: ListenerEntry[];
+  nextSeq: number;
+}
+
+// Module-level, not per-request: the MCP transport is stateless (no session tied to a
+// connection), but this extension runs inside Vortex's own long-lived process, so state
+// here survives across separate tool calls just fine — that's what makes register-then-
+// poll possible at all.
+const listeners = new Map<string, ListenerRecord>();
+
+function registerListener(
+  api: IExtensionApi,
+  name: string,
+  args: unknown[],
+): { listenerId: string } {
+  const spec = LISTENER_SPECS[name];
+  const callbackIndex = args.indexOf(CALLBACK_SENTINEL);
+  if (callbackIndex === -1) {
+    throw new Error(
+      `${name} registers a persistent listener and needs the "__CALLBACK__" sentinel in args ` +
+        "at the callback position — see vortex_describe's listenerHints.",
+    );
+  }
+  if (listeners.size >= MAX_CONCURRENT_LISTENERS) {
+    throw new Error(
+      `Too many active listeners (${MAX_CONCURRENT_LISTENERS} max) — none of these apiMethods ` +
+        "support unregistering, so restart Vortex to clear them before registering more.",
+    );
+  }
+
+  const listenerId = crypto.randomUUID();
+  const record: ListenerRecord = { name, buffer: [], nextSeq: 1 };
+  listeners.set(listenerId, record);
+
+  const callback = (...callArgs: unknown[]): unknown => {
+    record.buffer.push({ seq: record.nextSeq++, args: callArgs, receivedAt: Date.now() });
+    if (record.buffer.length > MAX_BUFFER_ENTRIES_PER_LISTENER) {
+      record.buffer.shift();
+    }
+    switch (spec.returns) {
+      case "promiseUndefined":
+        return Promise.resolve(undefined);
+      case "promiseArray":
+        return Promise.resolve([]);
+      default:
+        return undefined;
+    }
+  };
+
+  const realArgs = [...args];
+  realArgs[callbackIndex] = callback;
+
+  const apiFn = (api as unknown as Record<string, unknown>)[name];
+  (apiFn as (...fnArgs: unknown[]) => unknown).apply(api, realArgs);
+
+  return { listenerId };
+}
+
+/**
+ * Reads back what a listener registered via dispatchAction has captured since `since`
+ * (a previously-returned `lastSeq`, or 0 for everything still buffered). Non-destructive
+ * — repeated polling with the same `since` returns the same entries — the ring buffer
+ * itself is what bounds memory, not draining on read.
+ */
+export function pollListener(
+  listenerId: string,
+  since = 0,
+): { entries: ListenerEntry[]; lastSeq: number } {
+  const record = listeners.get(listenerId);
+  if (record === undefined) {
+    throw new Error(
+      `Unknown listenerId: ${listenerId}. It may have never existed, or Vortex restarted — ` +
+        "listeners don't survive a restart.",
+    );
+  }
+  const entries = record.buffer.filter((entry) => entry.seq > since);
+  return { entries, lastSeq: entries.length > 0 ? entries[entries.length - 1].seq : since };
+}
+
 /**
  * Dispatches a named Vortex action creator, api.ext function, event, or direct api
  * method — checked in that order. Not allowlisted: everything vortex_describe reflects
  * is reachable this way, once the caller holds the write-tier bearer token (see
  * ACTION_HINTS's comment for why that token, not a second curated list, is the actual
  * security boundary). Events need the CALLBACK_SENTINEL convention to await actual
- * completion rather than just firing.
+ * completion rather than just firing; the small set of apiMethods in LISTENER_SPECS use
+ * the same convention to register a persistent listener instead (see registerListener).
  */
 export async function dispatchAction(
   api: IExtensionApi,
@@ -378,6 +515,19 @@ export async function dispatchAction(
 
   if (api.events.eventNames().includes(name)) {
     return dispatchEvent(api, name, args);
+  }
+
+  if (name in LISTENER_SPECS) {
+    return registerListener(api, name, args);
+  }
+
+  if (name === "withPrePost") {
+    throw new Error(
+      "withPrePost returns a wrapped function rather than performing an action or " +
+        "registering a listener — it can't be usefully dispatched over MCP (the returned " +
+        "function isn't JSON-serializable, and nothing happens until it's invoked, which " +
+        "this dispatcher never does).",
+    );
   }
 
   const apiFn = (api as unknown as Record<string, unknown>)[name];

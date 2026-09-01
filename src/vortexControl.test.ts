@@ -66,6 +66,7 @@ import {
   listMods,
   listNotifications,
   listRuntimeErrors,
+  pollListener,
   queryStatePath,
   querySelector,
   restartVortex,
@@ -109,6 +110,7 @@ describe("vortexControl: reflection", () => {
     expect(result.extensionApis).toEqual([]);
     expect(result.extensionApiHints.nexusGetModInfo).toContain("gameId: string");
     expect(result.eventHints["deploy-mods"]).toContain("__CALLBACK__");
+    expect(result.listenerHints.onStateChange).toContain("__CALLBACK__");
   });
 
   it("describeApi surfaces api.ext names as extensionApis without exposing the functions", () => {
@@ -577,6 +579,73 @@ describe("vortexControl: dispatchAction", () => {
     (api as unknown as { ext: Record<string, unknown> }).ext = {};
 
     await expect(dispatchAction(api, "totallyMadeUp")).rejects.toThrow(/Unknown action/);
+  });
+
+  it("registers a persistent listener for a known listener apiMethod and returns a listenerId", async () => {
+    let capturedCallback: ((...args: unknown[]) => unknown) | undefined;
+    const onStateChange = vi.fn((_path: string[], cb: (...args: unknown[]) => unknown) => {
+      capturedCallback = cb;
+    });
+    const api = fakeApi();
+    (api as unknown as { ext: Record<string, unknown> }).ext = {};
+    (api as unknown as { onStateChange: unknown }).onStateChange = onStateChange;
+
+    const result = (await dispatchAction(api, "onStateChange", [
+      ["settings", "interface", "advanced"],
+      "__CALLBACK__",
+    ])) as { listenerId: string };
+
+    expect(onStateChange).toHaveBeenCalledWith(
+      ["settings", "interface", "advanced"],
+      expect.any(Function),
+    );
+    expect(result.listenerId).toEqual(expect.any(String));
+    expect(pollListener(result.listenerId).entries).toEqual([]);
+
+    capturedCallback?.(false, true);
+    capturedCallback?.(true, false);
+
+    const firstPoll = pollListener(result.listenerId);
+    expect(firstPoll.entries.map((e) => e.args)).toEqual([
+      [false, true],
+      [true, false],
+    ]);
+
+    // Non-destructive: polling again with the same `since` returns the same entries.
+    expect(pollListener(result.listenerId).entries).toEqual(firstPoll.entries);
+
+    // Passing back lastSeq only returns what arrived after it.
+    capturedCallback?.("third");
+    const secondPoll = pollListener(result.listenerId, firstPoll.lastSeq);
+    expect(secondPoll.entries.map((e) => e.args)).toEqual([["third"]]);
+  });
+
+  it("throws a clear error when a listener apiMethod is dispatched without the __CALLBACK__ sentinel", async () => {
+    const onStateChange = vi.fn();
+    const api = fakeApi();
+    (api as unknown as { ext: Record<string, unknown> }).ext = {};
+    (api as unknown as { onStateChange: unknown }).onStateChange = onStateChange;
+
+    await expect(dispatchAction(api, "onStateChange", [["settings"]])).rejects.toThrow(
+      /needs the "__CALLBACK__" sentinel/,
+    );
+    expect(onStateChange).not.toHaveBeenCalled();
+  });
+
+  it("rejects dispatching withPrePost since its return value isn't usefully expressible over MCP", async () => {
+    const withPrePost = vi.fn();
+    const api = fakeApi();
+    (api as unknown as { ext: Record<string, unknown> }).ext = {};
+    (api as unknown as { withPrePost: unknown }).withPrePost = withPrePost;
+
+    await expect(dispatchAction(api, "withPrePost", ["did-deploy"])).rejects.toThrow(
+      /can't be usefully dispatched/,
+    );
+    expect(withPrePost).not.toHaveBeenCalled();
+  });
+
+  it("pollListener throws for an unknown listenerId", () => {
+    expect(() => pollListener("not-a-real-id")).toThrow(/Unknown listenerId/);
   });
 
   it("dispatches removeProfile like any other action", async () => {

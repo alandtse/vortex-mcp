@@ -41,10 +41,12 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
         "(`actions`/`extensionApis`/`eventNames`/`apiMethods` — all of these are callable, no " +
         "allowlist; the loopback bind + bearer token is the real security boundary), with real " +
         "positional argument order for the ones this project has verified (`dispatchHints`/" +
-        '`extensionApiHints`/`eventHints`, e.g. dispatchHints.setModEnabled = "profileId: ' +
-        'string, modId: string, enable: boolean" — missing from these maps just means no ' +
-        "pre-verified arg order, not that it's unavailable; eventHints also documents the " +
-        '"__CALLBACK__" sentinel position for the few events that need one), and top-level ' +
+        "`extensionApiHints`/`eventHints`/`listenerHints`, e.g. dispatchHints.setModEnabled = " +
+        '"profileId: string, modId: string, enable: boolean" — missing from these maps just ' +
+        "means no pre-verified arg order, not that it's unavailable; eventHints/listenerHints " +
+        'also document the "__CALLBACK__" sentinel position for the few events/apiMethods ' +
+        "that need one — a listenerHints entry means that apiMethod registers a persistent " +
+        "listener instead of performing a one-off action; see poll_listener), and top-level " +
         "Redux state keys (for vortex_query's path mode, includes state added by any loaded " +
         "extension, not just core Vortex). Reflects whatever Vortex is actually running right " +
         "now — new selectors/actions/events/state show up here without an extension rebuild.",
@@ -440,11 +442,16 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
         "Node-style (err, result?) => void callback and vortex_dispatch will await real " +
         "completion instead (e.g. action='deploy-mods', args=['__CALLBACK__'] resolves once " +
         "deployment actually finishes, not just once it started). (4) a direct method on the " +
-        "api object itself (e.g. action='sendNotification'). Not allowlisted: everything in " +
-        "vortex_describe's `actions`/`extensionApis`/`eventNames`/`apiMethods` lists is " +
-        "callable this way once you hold the write-tier token — that token, not a curated " +
-        "list, is the actual security boundary, matching what a human at Vortex's own UI can " +
-        "already do. Use vortex_describe's `dispatchHints`/`extensionApiHints`/`eventHints` " +
+        "api object itself (e.g. action='sendNotification') — a small subset of these " +
+        "(onStateChange, onAsync, registerProtocol, registerRepositoryLookup; see " +
+        "vortex_describe's `listenerHints`) register a persistent listener instead of " +
+        'performing a one-off action: pass "__CALLBACK__" the same way, and this returns a ' +
+        "listenerId immediately rather than waiting for anything — poll what it's captured " +
+        "with poll_listener. Not allowlisted: everything in vortex_describe's `actions`/" +
+        "`extensionApis`/`eventNames`/`apiMethods` lists is callable this way once you hold " +
+        "the write-tier token — that token, not a curated list, is the actual security " +
+        "boundary, matching what a human at Vortex's own UI can already do. Use " +
+        "vortex_describe's `dispatchHints`/`extensionApiHints`/`eventHints`/`listenerHints` " +
         "for the real argument order (incl. the __CALLBACK__ position) where this project has " +
         "verified one; for anything else, check Vortex's source or test carefully with a " +
         "state read before/after.",
@@ -455,7 +462,8 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
           .optional()
           .describe(
             "Positional arguments for the action creator/function/event/method " +
-              '(include "__CALLBACK__" at the callback position to await a callback-based event)',
+              '(include "__CALLBACK__" at the callback position to await a callback-based ' +
+              "event, or to register a persistent listener)",
           ),
       }),
     },
@@ -463,6 +471,33 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
       const dispatched = await control.dispatchAction(api, action, args);
       return { content: [jsonText(dispatched)] };
     },
+  );
+
+  server.registerTool(
+    "poll_listener",
+    {
+      description:
+        "Read back what a persistent listener registered via vortex_dispatch (onStateChange/" +
+        "onAsync/registerProtocol/registerRepositoryLookup) has captured. Non-destructive — " +
+        "repeated polling with the same `since` returns the same entries; the listener's own " +
+        "ring buffer (capped at 500 firings, oldest dropped) is what bounds memory, not " +
+        "draining on read. Pass back the returned `lastSeq` as the next call's `since` to get " +
+        "only what's arrived since. Listeners don't survive a Vortex restart.",
+      inputSchema: z.object({
+        listenerId: z
+          .string()
+          .describe("Id returned by the vortex_dispatch call that registered it"),
+        since: z
+          .number()
+          .int()
+          .optional()
+          .default(0)
+          .describe("Only return entries after this seq (e.g. a previous call's lastSeq)"),
+      }),
+    },
+    async ({ listenerId, since }) => ({
+      content: [jsonText(control.pollListener(listenerId, since))],
+    }),
   );
 
   server.registerTool(
