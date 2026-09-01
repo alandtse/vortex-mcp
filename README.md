@@ -11,15 +11,16 @@ endpoint, no clicking through the UI.
 Unit- and integration-tested (real HTTP requests against the actual server,
 real Host/Origin/token gating, real MCP `initialize` handshake) — see
 `pnpm run test`. Every read tool and every write tool except
-`install_mod_from_url` and `launch_game` has been live-verified against a
-real Vortex install, including a full write cycle (`set_mods_enabled`,
-`deploy_mods`, `purge_mods`, `vortex_dispatch`) against a disposable test
-profile, with a `backup_state` snapshot taken before starting.
+`install_mod_from_url` has been live-verified against a real Vortex
+install, including a full write cycle (`set_mods_enabled`, `deploy_mods`,
+`purge_mods`, `vortex_dispatch`) against a disposable test profile, with a
+`backup_state` snapshot taken before starting. `launch_game` was live-
+verified end to end — deploy, launch, confirmed the real game process
+came up — with explicit confirmation first, since unlike everything else
+here it has a visible real-world side effect.
 `install_mod_from_url` is deliberately never exercised outside unit tests
 — it can trigger a blocking "choose install type" modal for ambiguous
-archives, unsafe to risk unsupervised. `launch_game` is unit-tested only
-so far — live-verifying it means actually starting the configured game
-process, which needs explicit confirmation before it's exercised for real.
+archives, unsafe to risk unsupervised.
 
 ## Stack
 
