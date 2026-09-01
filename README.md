@@ -92,6 +92,8 @@ hand-transcribed, so it can't silently drift from the code.
 | `list_duplicate_mods`         | read   | Find installed mods that look like duplicates or redundant leftovers — never auto-resolved, purely informational (same 'report candidates,…  |
 | `list_known_mod_conflicts`    | read   | Surfaces real 'conflicts'-type rules Vortex already has recorded on enabled mods (mod.rules — the same field list_mod_rules reads, often po… |
 | `find_missing_deployed_files` | read   | Find plugins where Vortex's load-order state, what's actually deployed to the game's Data folder, and what the game's own plugins.txt says…  |
+| `get_nexus_mod_info`          | read   | Look up a mod's info from Nexus Mods via Vortex's own built-in integration and the user's existing Vortex login — no separate API key neede… |
+| `check_nexus_mod_updates`     | read   | Check installed Nexus-sourced mods for available updates via Vortex's own built-in integration and the user's existing Vortex login — no se… |
 | `list_dialogs`                | read   | List Vortex's currently-open modal dialogs (e.g. a 'files changed outside Vortex' prompt that can block a deploy) — distinct from list_noti… |
 | `switch_profile`              | write  | Switch Vortex to a different profile by id.                                                                                                  |
 | `clone_profile`               | write  | Clone an existing profile into a new one (copies its on-disk profile directory — load order, ini tweaks — plus its mod enabled-state), the…  |
@@ -203,7 +205,8 @@ read tools (`vortex_describe`, `vortex_query`, `list_mods`, `list_load_order`,
 `list_categories`, `list_downloads`, `list_notifications`, `list_mod_rules`,
 `find_mod_by_file`, `list_file_conflicts`, `find_missing_masters`,
 `list_runtime_errors`, `list_duplicate_mods`, `list_known_mod_conflicts`,
-`find_missing_deployed_files`, `list_dialogs`) are ever registered
+`find_missing_deployed_files`, `get_nexus_mod_info`, `check_nexus_mod_updates`,
+`list_dialogs`) are ever registered
 — none of the eleven write tools
 (`switch_profile`, `clone_profile`, `vortex_dispatch`, `backup_state`,
 `set_mods_enabled`, `deploy_mods`, `purge_mods`, `install_mod_from_url`,
