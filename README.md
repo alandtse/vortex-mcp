@@ -13,15 +13,20 @@ real Host/Origin/token gating, real MCP `initialize` handshake) — see
 `pnpm run test`. Every read tool, and `vortex_dispatch` across all four of
 its fallback tiers (action creator, api.ext function, event — both
 fire-and-forget and `"__CALLBACK__"`-awaited, e.g.
-`action="deploy-mods", args=["__CALLBACK__"]` — and direct api method),
-has been live-verified against a real Vortex install against a disposable
-test profile, with a `backup_state` snapshot taken before starting.
-`launch_game` was live-verified end to end — deploy, launch, confirmed the
-real game process came up — with explicit confirmation first, since unlike
-everything else here it has a visible real-world side effect. The
-`start-download` event (installing a mod from a URL) is deliberately never
-exercised outside unit tests — it can trigger a blocking "choose install
-type" modal for ambiguous archives, unsafe to risk unsupervised.
+`action="deploy-mods", args=["__CALLBACK__"]` — and direct api method,
+including the listener-registering subset paired with `poll_listener` —
+registered `onStateChange` against a real state path, triggered two real
+firings via `setAdvancedMode`, and confirmed `poll_listener` returned both
+in order, non-destructively, with `since` correctly filtering to only
+what's new), has been live-verified against a real Vortex install against
+a disposable test profile, with a `backup_state` snapshot taken before
+starting. `launch_game` was live-verified end to end — deploy, launch,
+confirmed the real game process came up — with explicit confirmation
+first, since unlike everything else here it has a visible real-world side
+effect. The `start-download` event (installing a mod from a URL) is
+deliberately never exercised outside unit tests — it can trigger a
+blocking "choose install type" modal for ambiguous archives, unsafe to
+risk unsupervised.
 
 ## Stack
 
@@ -98,6 +103,7 @@ hand-transcribed, so it can't silently drift from the code.
 | `switch_profile`              | write  | Switch Vortex to a different profile by id.                                                                                                  |
 | `clone_profile`               | write  | Clone an existing profile into a new one (copies its on-disk profile directory — load order, ini tweaks — plus its mod enabled-state), the…  |
 | `vortex_dispatch`             | write  | Dispatch a named Vortex action creator, api.ext function, event, or direct api method — tried in that order.                                 |
+| `poll_listener`               | write  | Read back what a persistent listener registered via vortex_dispatch (onStateChange/onAsync/registerProtocol/registerRepositoryLookup) has c… |
 | `backup_state`                | write  | Create a full snapshot of Vortex's settings/persistent/app/user state as a JSON file in Vortex's own backup folder (%APPDATA%/vortex/temp/s… |
 | `set_mods_enabled`            | write  | Enable or disable a set of mods for a profile (defaults to the active profile).                                                              |
 | `launch_game`                 | write  | Launch a game's configured primary tool (e.g. SKSE, or the vanilla exe if none is set) — the same operation as Vortex's own 'Play' button,…  |
@@ -167,6 +173,32 @@ per event), but became fully expressible through `vortex_dispatch`'s event
 fallback tier once it grew the `"__CALLBACK__"` convention, so they were
 removed as dedicated tools.
 
+A handful of `apiMethods` (`onStateChange`, `onAsync`, `registerProtocol`,
+`registerRepositoryLookup` — see `vortex_describe`'s `listenerHints`)
+don't perform a one-off action at all: they register a real JS function as
+a persistent listener that keeps firing for the life of the Vortex
+process. A function can't cross JSON-RPC, and the MCP transport here is
+stateless (no session tied to a connection to push results back down
+later), so `vortex_dispatch`-ing one of these substitutes the
+`"__CALLBACK__"` sentinel with a real callback that appends each firing to
+an in-process ring buffer (capped at 500 entries, oldest dropped — none of
+these APIs expose a way to unregister, so a registered listener outlives
+the call that created it) and returns a `listenerId` immediately instead
+of trying to wait for or return "the result" of something that keeps
+happening. `poll_listener` reads that buffer back — non-destructively, so
+repeated polling with the same `since` returns the same entries, with the
+returned `lastSeq` fed back in to get only what's new. This works because
+the transport being stateless only means no session-per-connection, not
+that the process is stateless: this extension runs inside Vortex's own
+long-lived process, so the listener registry survives fine across
+separate, independent tool calls — including from more than one agent at
+once, since there's already no per-caller identity in this project's trust
+model (see [Safety](#safety)): any holder of the token can register or
+poll any listener. `withPrePost` is excluded outright rather than handled
+this way — it returns a wrapped function rather than performing an action
+or registering anything, which isn't serializable and does nothing until
+invoked, which this dispatcher never does.
+
 ### Keeping this table in sync
 
 The tools table above is generated, not hand-written — it comes straight
@@ -231,9 +263,10 @@ read tools (`vortex_describe`, `vortex_query`, `list_mods`, `list_load_order`,
 `list_runtime_errors`, `list_duplicate_mods`, `list_known_mod_conflicts`,
 `find_missing_deployed_files`, `check_nexus_mod_updates`,
 `list_dialogs`) are ever registered
-— none of the seven write tools
-(`switch_profile`, `clone_profile`, `vortex_dispatch`, `backup_state`,
-`set_mods_enabled`, `launch_game`, `vortex_restart`) exist to call. Set `VORTEX_MCP_TOKEN` to
+— none of the eight write tools
+(`switch_profile`, `clone_profile`, `vortex_dispatch`, `poll_listener`,
+`backup_state`, `set_mods_enabled`, `launch_game`, `vortex_restart`) exist
+to call. Set `VORTEX_MCP_TOKEN` to
 require `Authorization: Bearer <token>` on every request (reads included)
 _and_ unlock the write tools. There is no per-tool authorization once a
 token is set — any client holding it has full write privileges, including

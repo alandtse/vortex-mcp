@@ -41,6 +41,7 @@ const ACCESS_TIER = {
   switch_profile: "write",
   clone_profile: "write",
   vortex_dispatch: "write",
+  poll_listener: "write",
   backup_state: "write",
   set_mods_enabled: "write",
   launch_game: "write",
