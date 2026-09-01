@@ -210,7 +210,9 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
       description:
         "List files provided by more than one currently-enabled mod (for the active/given " +
         "profile) — the read side of conflict resolution; found by scanning mod staging " +
-        "folders on disk, no reflectable API exposes this. Doesn't report a 'winner' — " +
+        "folders on disk, no reflectable API exposes this. Each entry's `risk` is a coarse " +
+        "file-type hint (high: plugins/scripts/archives, medium: interface/config, low: " +
+        "everything else, e.g. meshes/textures) — not a winner. Doesn't report a winner — " +
         "Vortex's actual resolution depends on deploy/rule order in ways not safe to " +
         "reimplement here. Resolve a conflict via vortex_dispatch: setFileOverride to pick " +
         "a winning mod for specific files, or addModRule with type 'before'/'after' to " +

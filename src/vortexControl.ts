@@ -796,10 +796,34 @@ export async function findModByFile(
   return matches;
 }
 
+export type FileConflictRisk = "high" | "medium" | "low";
+
 export interface FileConflictEntry {
   /** Relative path (lowercased) within the deployed mod folder that more than one enabled mod provides. */
   file: string;
   mods: { id: string; name: string }[];
+  /**
+   * A coarse hint for how much a conflict on this file type usually matters — scripts/
+   * plugins/archives (high) can affect runtime behavior and quest logic; interface/config
+   * (medium) can break menus and generated patch outputs; everything else (low, e.g.
+   * meshes/textures) is usually cosmetic. Purely a file-extension classification, not a
+   * judgment about THIS specific conflict — still doesn't say who wins or what to do.
+   */
+  risk: FileConflictRisk;
+}
+
+const HIGH_RISK_EXTENSIONS = new Set([".esp", ".esm", ".esl", ".dll", ".pex", ".bsa", ".ba2"]);
+const MEDIUM_RISK_EXTENSIONS = new Set([".ini", ".json", ".xml", ".txt", ".swf", ".gfx"]);
+
+function fileConflictRisk(relPath: string): FileConflictRisk {
+  const ext = path.extname(relPath).toLowerCase();
+  if (HIGH_RISK_EXTENSIONS.has(ext)) {
+    return "high";
+  }
+  if (MEDIUM_RISK_EXTENSIONS.has(ext)) {
+    return "medium";
+  }
+  return "low";
 }
 
 /**
@@ -808,7 +832,8 @@ export interface FileConflictEntry {
  * vortex_dispatch (setFileOverride to pick a winner, addModRule with type "before"/"after"
  * to control load/deploy order). Deliberately doesn't report a "winner": Vortex's actual
  * resolution depends on deploy/rule order in ways not safe to reimplement here — this
- * just tells you what needs resolving.
+ * just tells you what needs resolving. `risk` is a coarse file-type hint (scripts/plugins
+ * matter more than textures), not a resolution.
  */
 export async function listFileConflicts(
   api: IExtensionApi,
@@ -849,7 +874,7 @@ export async function listFileConflicts(
     if (nameFilterLower !== undefined && !file.includes(nameFilterLower)) {
       continue;
     }
-    entries.push({ file, mods: ownerList });
+    entries.push({ file, mods: ownerList, risk: fileConflictRisk(file) });
   }
   entries.sort((a, b) => a.file.localeCompare(b.file));
   return options.limit !== undefined ? entries.slice(0, options.limit) : entries;

@@ -888,8 +888,34 @@ describe("vortexControl: findModByFile / listFileConflicts", () => {
           { id: "modA", name: "modA" },
           { id: "modB", name: "modB" },
         ]),
+        risk: "high",
       },
     ]);
+  });
+
+  it("listFileConflicts classifies risk by file type without picking a winner", async () => {
+    await writeModFile("ModA", "plugin.esp");
+    await writeModFile("ModB", "plugin.esp");
+    await writeModFile("ModA", "settings.ini");
+    await writeModFile("ModB", "settings.ini");
+    await writeModFile("ModA", "texture.dds");
+    await writeModFile("ModB", "texture.dds");
+    const api = apiWithMods(
+      {
+        modA: { id: "modA", installationPath: "ModA" },
+        modB: { id: "modB", installationPath: "ModB" },
+      },
+      { modA: { enabled: true }, modB: { enabled: true } },
+    );
+
+    const conflicts = await listFileConflicts(api);
+    const riskByFile = Object.fromEntries(conflicts.map((c) => [c.file, c.risk]));
+
+    expect(riskByFile).toEqual({
+      "plugin.esp": "high",
+      "settings.ini": "medium",
+      "texture.dds": "low",
+    });
   });
 
   it("listFileConflicts ignores a disabled mod's files entirely", async () => {
