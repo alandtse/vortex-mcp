@@ -35,6 +35,7 @@ vi.mock("./vortexControl", () => ({
   findMissingMasters: vi.fn(async () => []),
   listRuntimeErrors: vi.fn(async () => []),
   listDuplicateMods: vi.fn(async () => []),
+  listKnownModConflicts: vi.fn(() => []),
   listFileConflicts: vi.fn(async () => []),
   setModsEnabled: vi.fn(async () => undefined),
   deployMods: vi.fn(async () => undefined),

@@ -61,6 +61,7 @@ import {
   listDownloads,
   listDuplicateMods,
   listFileConflicts,
+  listKnownModConflicts,
   listLoadOrder,
   listModRules,
   listMods,
@@ -1199,5 +1200,100 @@ describe("vortexControl: listDuplicateMods", () => {
     );
 
     expect(await listDuplicateMods(api)).toEqual([]);
+  });
+});
+
+describe("vortexControl: listKnownModConflicts", () => {
+  it("surfaces a real 'conflicts' rule between two enabled mods", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    vi.mocked(selectors.activeProfile).mockReturnValue({
+      gameId: "skyrimse",
+      modState: { modA: { enabled: true }, modB: { enabled: true } },
+    } as never);
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: {
+            modA: {
+              id: "modA",
+              type: "",
+              installationPath: "",
+              rules: [{ type: "conflicts", reference: { id: "modB" } }],
+            },
+            modB: { id: "modB", type: "", installationPath: "" },
+          },
+        },
+      },
+    });
+
+    expect(listKnownModConflicts(api)).toEqual([
+      { modId: "modA", modName: "modA", targetId: "modB", targetName: "modB", targetEnabled: true },
+    ]);
+  });
+
+  it("reports targetEnabled: false when the conflicting mod is installed but disabled", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    vi.mocked(selectors.activeProfile).mockReturnValue({
+      gameId: "skyrimse",
+      modState: { modA: { enabled: true }, modB: { enabled: false } },
+    } as never);
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: {
+            modA: {
+              id: "modA",
+              type: "",
+              installationPath: "",
+              rules: [{ type: "conflicts", reference: { id: "modB" } }],
+            },
+            modB: { id: "modB", type: "", installationPath: "" },
+          },
+        },
+      },
+    });
+
+    expect(listKnownModConflicts(api)).toEqual([
+      {
+        modId: "modA",
+        modName: "modA",
+        targetId: "modB",
+        targetName: "modB",
+        targetEnabled: false,
+      },
+    ]);
+  });
+
+  it("ignores non-conflicts rule types and disabled source mods", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    vi.mocked(selectors.activeProfile).mockReturnValue({
+      gameId: "skyrimse",
+      modState: { modA: { enabled: false }, modB: { enabled: true } },
+    } as never);
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: {
+            modA: {
+              id: "modA",
+              type: "",
+              installationPath: "",
+              rules: [{ type: "conflicts", reference: { id: "modB" } }],
+            },
+            modB: {
+              id: "modB",
+              type: "",
+              installationPath: "",
+              rules: [{ type: "before", reference: { id: "modA" } }],
+            },
+          },
+        },
+      },
+    });
+
+    expect(listKnownModConflicts(api)).toEqual([]);
   });
 });

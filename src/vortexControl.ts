@@ -1169,3 +1169,57 @@ export async function listDuplicateMods(
 
   return groups;
 }
+
+export interface KnownModConflictMatch {
+  modId: string;
+  modName: string;
+  targetId: string;
+  /** Name of the conflicting mod, only set when that mod is also currently installed. */
+  targetName?: string;
+  /** True when the conflicting mod is both installed AND currently enabled — an active conflict. */
+  targetEnabled: boolean;
+}
+
+/**
+ * Surfaces real "conflicts"-type rules Vortex already has recorded on installed mods
+ * (mod.rules — the same field list_mod_rules reads, often populated from Nexus mod page
+ * metadata or added by the user) for the currently-enabled mod set. This is genuine
+ * Vortex data, not invented domain knowledge — deliberately does NOT hardcode any
+ * mod-compatibility facts of its own.
+ */
+export function listKnownModConflicts(
+  api: IExtensionApi,
+  gameId?: string,
+): KnownModConflictMatch[] {
+  const st = state(api);
+  const targetGameId = gameId ?? selectors.activeGameId(st);
+  if (!targetGameId) {
+    throw new Error("No active game and no gameId provided");
+  }
+  const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
+  const profile = selectors.activeProfile(st);
+  const isEnabled = (modId: string): boolean =>
+    profile?.gameId === targetGameId ? (profile?.modState?.[modId]?.enabled ?? false) : false;
+  const enabledMods = Object.values(mods).filter((mod) => isEnabled(mod.id));
+
+  type RealModRule = { type: string; reference: { id?: string; idHint?: string } };
+  const matches: KnownModConflictMatch[] = [];
+  for (const mod of enabledMods) {
+    const rules = (mod.rules ?? []) as unknown as RealModRule[];
+    for (const rule of rules) {
+      if (rule.type !== "conflicts") {
+        continue;
+      }
+      const targetId = rule.reference.id ?? rule.reference.idHint ?? "(unresolved reference)";
+      const targetMod = mods[targetId];
+      matches.push({
+        modId: mod.id,
+        modName: util.renderModName(mod),
+        targetId,
+        targetName: targetMod !== undefined ? util.renderModName(targetMod) : undefined,
+        targetEnabled: isEnabled(targetId),
+      });
+    }
+  }
+  return matches;
+}

@@ -306,6 +306,24 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "list_known_mod_conflicts",
+    {
+      description:
+        "Surfaces real 'conflicts'-type rules Vortex already has recorded on enabled mods " +
+        "(mod.rules — the same field list_mod_rules reads, often populated from Nexus mod " +
+        "page metadata or added by the user). Genuine Vortex data, not invented " +
+        "compatibility knowledge — `targetEnabled` tells you whether the conflicting mod " +
+        "is actually active right now.",
+      inputSchema: z.object({
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+      }),
+    },
+    async ({ gameId }) => ({
+      content: [jsonText(control.listKnownModConflicts(api, gameId))],
+    }),
+  );
+
+  server.registerTool(
     "list_dialogs",
     {
       description:

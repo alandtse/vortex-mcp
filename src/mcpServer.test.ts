@@ -35,6 +35,7 @@ vi.mock("./vortexControl", () => ({
   findMissingMasters: vi.fn(async () => []),
   listRuntimeErrors: vi.fn(async () => []),
   listDuplicateMods: vi.fn(async () => []),
+  listKnownModConflicts: vi.fn(() => []),
   listFileConflicts: vi.fn(async () => []),
   setModsEnabled: vi.fn(async () => undefined),
   deployMods: vi.fn(async () => undefined),
@@ -161,6 +162,7 @@ describe("mcpServer HTTP gating", () => {
         "find_missing_masters",
         "list_runtime_errors",
         "list_duplicate_mods",
+        "list_known_mod_conflicts",
       ]),
     );
     expect(names).not.toEqual(
