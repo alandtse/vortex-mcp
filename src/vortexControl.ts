@@ -103,6 +103,10 @@ export interface ApiDescription {
    * admin-level actions. A specific one becomes a dedicated tool if it's actually needed.
    */
   extensionApis: string[];
+  /** Subset of `extensionApis` actually callable via vortex_query's extApi mode — see EXTENSION_API_ALLOWLIST. */
+  callableExtensionApis: string[];
+  /** Positional argument order for each callableExtensionApis entry. */
+  extensionApiHints: Record<string, string>;
   /**
    * Direct method names on the live IExtensionApi instance (api.foo(...)) — distinct
    * from selectors/actions/extensionApis. This is how a real capability gap got found:
@@ -133,6 +137,8 @@ export function describeApi(api: IExtensionApi): ApiDescription {
     dispatchHints: Object.fromEntries(DISPATCHABLE_ACTIONS),
     stateKeys: Object.keys(st as object).toSorted(),
     extensionApis: Object.keys(api.ext ?? {}).toSorted(),
+    callableExtensionApis: [...EXTENSION_API_ALLOWLIST.keys()].toSorted(),
+    extensionApiHints: Object.fromEntries(EXTENSION_API_ALLOWLIST),
     apiMethods: Object.keys(apiRecord)
       .filter((key) => typeof apiRecord[key] === "function")
       .toSorted(),
@@ -1326,16 +1332,24 @@ export async function findMissingDeployedFiles(
   return discrepancies;
 }
 
-// api.ext.nexusGetModInfo / api.ext.nexusCheckModsVersion — Vortex's own built-in Nexus
-// Mods integration, using the user's existing Vortex login, no separate API key needed.
-// api.ext functions have arbitrary signatures (extensionApis is informational-only, no
-// generic caller exists), so these are hand-written wrappers, not a generic dispatcher.
-// Real signatures confirmed by reading Vortex's own installed app.asar bundle (its source
-// map comments survive minification) rather than guessed:
-//   nexusGetModInfo(gameId: string, modId: number): Promise<Partial<IModInfo>>
-//   nexusCheckModsVersion(gameId: string, mods: IMod[], forceFull?: boolean): Promise<string[]>
-//   (checkModsVersion resolves to [] and shows its own error notification if the user
-//   isn't logged in to Nexus Mods — handled by Vortex itself, not duplicated here.)
+// api.ext.* — Vortex's own built-in extension APIs (Nexus Mods integration, using the
+// user's existing Vortex login, no separate API key needed; other extensions can add
+// more). Arbitrary signatures, no uniform shape (extensionApis is informational-only in
+// vortex_describe) — same reasoning DISPATCHABLE_ACTIONS exists for Redux actions, this
+// is the read-side equivalent: an explicit allowlist + one generic caller, reachable via
+// vortex_query's `extApi` mode, instead of a bespoke tool per api.ext function (found the
+// hard way — get_nexus_mod_info started as its own dedicated tool before being folded in
+// here). Real signatures confirmed by reading Vortex's own installed app.asar bundle (its
+// source map comments survive minification) rather than guessed.
+const EXTENSION_API_ALLOWLIST = new Map<string, string>([
+  [
+    "nexusGetModInfo",
+    "gameId: string, nexusModId: number — returns Partial<IModInfo>. nexusModId is the " +
+      "Nexus numeric mod id, not the Vortex-internal mod id — look it up first via " +
+      "vortex_query path=persistent.mods.<gameId>.<modId>.attributes.modId if you only " +
+      "have the Vortex mod id.",
+  ],
+]);
 
 function getExtensionApi<T>(api: IExtensionApi, name: string): T {
   const fn = (api.ext as unknown as Record<string, unknown>)[name];
@@ -1346,35 +1360,24 @@ function getExtensionApi<T>(api: IExtensionApi, name: string): T {
 }
 
 /**
- * Looks up a mod's info from Nexus Mods via Vortex's own built-in integration and the
- * user's existing Vortex login. `modId` can be either a Vortex-internal mod id (resolved
- * to its Nexus mod id via attributes.modId) or a Nexus numeric mod id directly.
+ * Calls a named, allowlisted api.ext function — the read-side counterpart to
+ * dispatchAction, for the same reason: most api.ext functions are simple enough
+ * (scalar args, no join needed) that a bespoke tool per one would just be tool-count
+ * sprawl. See EXTENSION_API_ALLOWLIST's own comment for what's covered and why.
  */
-export async function getNexusModInfo(
+export async function callExtensionApi(
   api: IExtensionApi,
-  modId: string | number,
-  gameId?: string,
-): Promise<Record<string, unknown>> {
-  const st = state(api);
-  const targetGameId = gameId ?? selectors.activeGameId(st);
-  if (!targetGameId) {
-    throw new Error("No active game and no gameId provided");
+  name: string,
+  args: unknown[] = [],
+): Promise<unknown> {
+  if (!EXTENSION_API_ALLOWLIST.has(name)) {
+    throw new Error(
+      `Extension API not allowlisted: ${name}. Only vetted, simple api.ext functions are ` +
+        "reachable this way — a genuine join (like check_nexus_mod_updates) stays a dedicated tool.",
+    );
   }
-  let nexusModId: number;
-  if (typeof modId === "number") {
-    nexusModId = modId;
-  } else {
-    const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
-    const attrs = mods[modId]?.attributes as { modId?: number } | undefined;
-    if (attrs?.modId === undefined) {
-      throw new Error(`Mod '${modId}' has no known Nexus mod id (attributes.modId).`);
-    }
-    nexusModId = attrs.modId;
-  }
-  const fn = getExtensionApi<
-    (gameId: string, nexusModId: number) => Promise<Record<string, unknown>>
-  >(api, "nexusGetModInfo");
-  return fn(targetGameId, nexusModId);
+  const fn = getExtensionApi<(...fnArgs: unknown[]) => Promise<unknown>>(api, name);
+  return fn(...args);
 }
 
 export interface ModUpdateCheckResult {

@@ -48,6 +48,7 @@ import { actions, fs, selectors, util } from "@nexusmods/vortex-api";
 import {
   activateGame,
   backupState,
+  callExtensionApi,
   checkNexusModUpdates,
   cloneProfile,
   deployMods,
@@ -56,7 +57,6 @@ import {
   findMissingDeployedFiles,
   findMissingMasters,
   findModByFile,
-  getNexusModInfo,
   installModFromUrl,
   launchGame,
   listCategories,
@@ -111,6 +111,8 @@ describe("vortexControl: reflection", () => {
     );
     expect(result.dispatchHints).not.toHaveProperty("setNextProfile");
     expect(result.extensionApis).toEqual([]);
+    expect(result.callableExtensionApis).toContain("nexusGetModInfo");
+    expect(result.extensionApiHints.nexusGetModInfo).toContain("gameId: string");
   });
 
   it("describeApi surfaces api.ext names as extensionApis without exposing the functions", () => {
@@ -1399,54 +1401,34 @@ describe("vortexControl: findMissingDeployedFiles", () => {
   });
 });
 
-describe("vortexControl: getNexusModInfo / checkNexusModUpdates", () => {
-  it("getNexusModInfo resolves a Vortex mod id to its Nexus mod id before calling the extension api", async () => {
-    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+describe("vortexControl: callExtensionApi / checkNexusModUpdates", () => {
+  it("callExtensionApi calls an allowlisted api.ext function with the given args", async () => {
     const nexusGetModInfo = vi.fn(async () => ({ name: "Cool Mod" }));
     const api = fakeApi();
-    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
-      persistent: {
-        mods: {
-          skyrimse: { modA: { id: "modA", attributes: { modId: 63979 } } },
-        },
-      },
-    });
     (api as unknown as { ext: Record<string, unknown> }).ext = { nexusGetModInfo };
 
-    const result = await getNexusModInfo(api, "modA");
+    const result = await callExtensionApi(api, "nexusGetModInfo", ["skyrimse", 63979]);
 
     expect(nexusGetModInfo).toHaveBeenCalledWith("skyrimse", 63979);
     expect(result).toEqual({ name: "Cool Mod" });
   });
 
-  it("getNexusModInfo uses a numeric modId directly without a state lookup", async () => {
-    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
-    const nexusGetModInfo = vi.fn(async () => ({ name: "Cool Mod" }));
+  it("callExtensionApi rejects a name that isn't allowlisted, without touching api.ext", async () => {
+    const someOtherFn = vi.fn();
     const api = fakeApi();
-    (api as unknown as { ext: Record<string, unknown> }).ext = { nexusGetModInfo };
+    (api as unknown as { ext: Record<string, unknown> }).ext = { someOtherFn };
 
-    await getNexusModInfo(api, 12345);
-
-    expect(nexusGetModInfo).toHaveBeenCalledWith("skyrimse", 12345);
+    await expect(callExtensionApi(api, "someOtherFn", [])).rejects.toThrow(/not allowlisted/);
+    expect(someOtherFn).not.toHaveBeenCalled();
   });
 
-  it("getNexusModInfo throws when the Vortex mod has no known Nexus mod id", async () => {
-    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
-    const api = fakeApi();
-    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
-      persistent: { mods: { skyrimse: { modA: { id: "modA", attributes: {} } } } },
-    });
-    (api as unknown as { ext: Record<string, unknown> }).ext = { nexusGetModInfo: vi.fn() };
-
-    await expect(getNexusModInfo(api, "modA")).rejects.toThrow(/no known Nexus mod id/);
-  });
-
-  it("getNexusModInfo throws a clear error when the extension isn't loaded", async () => {
-    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+  it("callExtensionApi throws a clear error when the allowlisted extension isn't loaded", async () => {
     const api = fakeApi();
     (api as unknown as { ext: Record<string, unknown> }).ext = {};
 
-    await expect(getNexusModInfo(api, 12345)).rejects.toThrow(/isn't available/);
+    await expect(callExtensionApi(api, "nexusGetModInfo", ["skyrimse", 1])).rejects.toThrow(
+      /isn't available/,
+    );
   });
 
   it("checkNexusModUpdates only checks installed mods sourced from nexus", async () => {

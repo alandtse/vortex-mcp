@@ -37,7 +37,7 @@ vi.mock("./vortexControl", () => ({
   listDuplicateMods: vi.fn(async () => []),
   listKnownModConflicts: vi.fn(() => []),
   findMissingDeployedFiles: vi.fn(async () => []),
-  getNexusModInfo: vi.fn(async () => ({})),
+  callExtensionApi: vi.fn(async () => ({})),
   checkNexusModUpdates: vi.fn(async () => ({ checkedCount: 0, updatedModIds: [] })),
   listFileConflicts: vi.fn(async () => []),
   setModsEnabled: vi.fn(async () => undefined),
@@ -50,6 +50,8 @@ vi.mock("./vortexControl", () => ({
   dispatchAction: vi.fn(() => ({ type: "NOOP" })),
   backupState: vi.fn(async () => "C:\\fake\\backup.json"),
 }));
+
+import { callExtensionApi } from "./vortexControl";
 
 let startMcpServer: typeof import("./mcpServer").startMcpServer;
 let port: number;
@@ -167,7 +169,6 @@ describe("mcpServer HTTP gating", () => {
         "list_duplicate_mods",
         "list_known_mod_conflicts",
         "find_missing_deployed_files",
-        "get_nexus_mod_info",
         "check_nexus_mod_updates",
       ]),
     );
@@ -206,5 +207,25 @@ describe("mcpServer HTTP gating", () => {
       result?: { content?: Array<{ type: string; text: string }> };
     };
     expect(parsed.result?.content?.[0]?.text).toBe("null");
+  });
+
+  it("vortex_query's extApi mode calls callExtensionApi with the given name and args", async () => {
+    const res = await request({
+      headers: jsonHeaders,
+      body: {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: {
+          name: "vortex_query",
+          arguments: { extApi: "nexusGetModInfo", args: ["skyrimse", 63979] },
+        },
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(callExtensionApi).toHaveBeenCalledWith(expect.anything(), "nexusGetModInfo", [
+      "skyrimse",
+      63979,
+    ]);
   });
 });

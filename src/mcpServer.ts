@@ -58,25 +58,32 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
     "vortex_query",
     {
       description:
-        "Read Vortex state. Two modes: `selector` calls that named vortex-api selector as " +
-        "`(state, ...args)` (e.g. selector='activeProfileId', or selector='profiles' then " +
-        "cross-reference the id yourself); `path` walks the Redux state tree by key " +
-        "(e.g. path=['persistent','mods','skyrimse']). Use vortex_describe first to see what's " +
-        "available. Read-only; use list_mods for a ready-formatted mod list.",
+        "Read Vortex state or call a vetted api.ext function. Three modes: `selector` " +
+        "calls that named vortex-api selector as `(state, ...args)` (e.g. " +
+        "selector='activeProfileId', or selector='profiles' then cross-reference the id " +
+        "yourself); `path` walks the Redux state tree by key (e.g. " +
+        "path=['persistent','mods','skyrimse']); `extApi` calls a named, allowlisted " +
+        "api.ext function as `(...args)` (e.g. extApi='nexusGetModInfo' — see " +
+        "vortex_describe's extensionApiHints for the full list and argument order). Use " +
+        "vortex_describe first to see what's available. Read-only.",
       inputSchema: z.object({
         selector: z.string().optional(),
-        args: z.array(z.unknown()).optional(),
         path: z.array(z.string()).optional(),
+        extApi: z.string().optional(),
+        args: z.array(z.unknown()).optional(),
       }),
     },
-    async ({ selector, args, path }) => {
+    async ({ selector, args, path, extApi }) => {
       if (selector !== undefined) {
         return { content: [jsonText(control.querySelector(api, selector, args))] };
       }
       if (path !== undefined) {
         return { content: [jsonText(control.queryStatePath(api, path))] };
       }
-      throw new Error("Provide either `selector` or `path`.");
+      if (extApi !== undefined) {
+        return { content: [jsonText(await control.callExtensionApi(api, extApi, args))] };
+      }
+      throw new Error("Provide `selector`, `path`, or `extApi`.");
     },
   );
 
@@ -346,32 +353,17 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
-    "get_nexus_mod_info",
-    {
-      description:
-        "Look up a mod's info from Nexus Mods via Vortex's own built-in integration and " +
-        "the user's existing Vortex login — no separate API key needed. modId can be " +
-        "either a Vortex-internal mod id (resolved via attributes.modId) or a Nexus " +
-        "numeric mod id directly.",
-      inputSchema: z.object({
-        modId: z.union([z.string(), z.number()]).describe("Vortex mod id or Nexus numeric mod id"),
-        gameId: z.string().optional().describe("Game id; defaults to the active game"),
-      }),
-    },
-    async ({ modId, gameId }) => ({
-      content: [jsonText(await control.getNexusModInfo(api, modId, gameId))],
-    }),
-  );
-
-  server.registerTool(
     "check_nexus_mod_updates",
     {
       description:
         "Check installed Nexus-sourced mods for available updates via Vortex's own " +
         "built-in integration and the user's existing Vortex login — no separate API " +
-        "key. Defaults to every installed mod with source 'nexus'; pass modIds to check " +
-        "a specific subset. Consumes the user's real Nexus API request quota — don't " +
-        "call this in a loop.",
+        "key. Kept as a dedicated tool (unlike get-mod-info, now folded into " +
+        "vortex_query's extApi mode) because it does a real join vortex_query can't do " +
+        "in one call: resolving mod ids to full IMod records and filtering to Nexus-" +
+        "sourced ones before calling the underlying api.ext function. Defaults to every " +
+        "installed mod with source 'nexus'; pass modIds to check a specific subset. " +
+        "Consumes the user's real Nexus API request quota — don't call this in a loop.",
       inputSchema: z.object({
         gameId: z.string().optional().describe("Game id; defaults to the active game"),
         modIds: z
