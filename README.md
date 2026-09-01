@@ -199,6 +199,47 @@ this way — it returns a wrapped function rather than performing an action
 or registering anything, which isn't serializable and does nothing until
 invoked, which this dispatcher never does.
 
+### When reflection genuinely can't reach something
+
+Every hand-written tool and fallback tier above exists because reflection
+alone can't express it — but they fall into two different categories, and
+telling them apart matters for where the fix belongs:
+
+1. **A real join or bit of orchestration reflection can't do in one call**
+   (`list_mods`, `clone_profile`, `launch_game`, `check_nexus_mod_updates`
+   above). The underlying operation is fully reachable through the
+   published `@nexusmods/vortex-api`; the tool just does more than one
+   generic call's worth of work. This is a vortex-mcp-side tool, and stays
+   one.
+2. **The published API genuinely doesn't expose the capability at all** —
+   not "reflection is clumsy here," but "there is no `actions`/`api.ext`/
+   event/apiMethod name to dispatch, published or not." The Vortex "files
+   changed outside Vortex" deploy-blocking dialog is the concrete case
+   that surfaced this: it isn't built on the generic `addDialog` system
+   `list_dialogs` reads, and the action creators that resolve it
+   (`setExternalChangeAction`, `confirmExternalChanges`) live in Vortex
+   core's `mod_management` extension, never exported through
+   `@nexusmods/vortex-api`. Worse, resolving it isn't even a pure Redux
+   action — `confirmExternalChanges` resolves a private in-memory Promise
+   captured in a module-scope closure the moment the dialog opened, so no
+   amount of raw `{type, payload}` dispatching from outside that module
+   could ever unblock the deploy waiting on it.
+
+   For case 2, the fix does **not** belong in vortex-mcp — there's nothing
+   here to hand-write around a capability the API doesn't have. It belongs
+   in Vortex core itself, as a `context.registerAPI(...)` addition (same
+   pattern as `restartVortex`'s `window.api.app.relaunch`: reaching a real
+   but previously-unpublished runtime surface, not inventing one). Once
+   Vortex exposes it that way, it becomes a normal `api.ext` entry —
+   vortex-mcp's reflection picks it up for free via `vortex_dispatch`'s
+   existing fallback tier, with **no vortex-mcp code change required**.
+   `mod_management/index.ts` gained `confirmExternalChanges`/
+   `setExternalChangeAction` `registerAPI` calls for exactly this reason;
+   once that ships, resolving the dialog from here is just
+   `vortex_dispatch({action: "confirmExternalChanges", args: [false]})`
+   (optionally preceded by `setExternalChangeAction` calls to override the
+   default per-file action first).
+
 ### Keeping this table in sync
 
 The tools table above is generated, not hand-written — it comes straight
