@@ -255,6 +255,33 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "list_runtime_errors",
+    {
+      description:
+        "Read recent Papyrus error lines and crash log excerpts from the game's real " +
+        "save-data folder (Documents/My Games/<game>) — Vortex has no concept of game " +
+        "runtime logs, this is pure filesystem reading. Doesn't try to parse or explain " +
+        "crash log internals (format varies by crash-logging mod) — surfaces the raw " +
+        "excerpt for you to reason about. Each entry's `mentionedFiles` lists any .esp/" +
+        ".esm/.esl/.dll/.pex filenames spotted in the text — pass one to find_mod_by_file " +
+        "to resolve which mod it belongs to. Only supports games with a verified save-data " +
+        "folder name (currently skyrimse, skyrimvr) — throws clearly for anything else.",
+      inputSchema: z.object({
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+        maxCrashLogs: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Cap how many recent crash logs to include (default 3)"),
+      }),
+    },
+    async ({ gameId, maxCrashLogs }) => ({
+      content: [jsonText(await control.listRuntimeErrors(api, { gameId, maxCrashLogs }))],
+    }),
+  );
+
+  server.registerTool(
     "list_dialogs",
     {
       description:

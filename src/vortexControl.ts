@@ -1,6 +1,6 @@
 import path from "node:path";
 import crypto from "node:crypto";
-import { open, readdir, stat } from "node:fs/promises";
+import { open, readdir, readFile, stat } from "node:fs/promises";
 
 import { actions, selectors, util, fs, log, types } from "@nexusmods/vortex-api";
 
@@ -968,4 +968,105 @@ export async function findMissingMasters(
   );
   results.sort((a, b) => a.plugin.localeCompare(b.plugin));
   return results;
+}
+
+// Vortex doesn't track game logs at all (Papyrus/SKSE/crash logs are the game engine's
+// own output, not Vortex state) — these live at a fixed, well-known Bethesda-games
+// location: Documents/My Games/<game>. Only games this project has actually verified the
+// folder name for are listed — deliberately not guessed for anything else (see the
+// clear error below for an unsupported gameId).
+const MY_GAMES_FOLDER: Record<string, string> = {
+  skyrimse: "Skyrim Special Edition",
+  skyrimvr: "Skyrim VR",
+};
+
+const MENTIONED_FILE_PATTERN = /\S+\.(?:esp|esm|esl|dll|pex)\b/gi;
+
+function extractMentionedFiles(text: string): string[] {
+  const matches = text.match(MENTIONED_FILE_PATTERN) ?? [];
+  return [...new Set(matches.map((match) => match.trim()))];
+}
+
+export interface RuntimeErrorEntry {
+  source: "papyrus" | "crash";
+  file: string;
+  mtime: string;
+  excerpt: string;
+  /** .esp/.esm/.esl/.dll/.pex filenames spotted in the text — pass one to find_mod_by_file to resolve. */
+  mentionedFiles: string[];
+}
+
+/**
+ * Reads recent Papyrus error lines and crash log excerpts from the game's real save-data
+ * folder (Documents/My Games/<game>) — pure filesystem reading, since Vortex has no
+ * concept of game runtime logs. Doesn't try to parse or explain crash log internals
+ * (format varies by crash-logging mod) — just surfaces the raw excerpt for the caller
+ * to reason about, and lists any mod-ish filenames mentioned so find_mod_by_file can
+ * resolve them.
+ */
+export async function listRuntimeErrors(
+  api: IExtensionApi,
+  options: { gameId?: string; maxCrashLogs?: number } = {},
+): Promise<RuntimeErrorEntry[]> {
+  const st = state(api);
+  const targetGameId = options.gameId ?? selectors.activeGameId(st);
+  if (!targetGameId) {
+    throw new Error("No active game and no gameId provided");
+  }
+  const myGamesFolder = MY_GAMES_FOLDER[targetGameId];
+  if (myGamesFolder === undefined) {
+    throw new Error(
+      `Don't know the save-data folder name for ${targetGameId}. Supported: ` +
+        Object.keys(MY_GAMES_FOLDER).join(", "),
+    );
+  }
+  const documentsPath = util.getVortexPath("documents");
+  const gameDocsRoot = path.join(documentsPath, "My Games", myGamesFolder);
+
+  const entries: RuntimeErrorEntry[] = [];
+
+  const papyrusPath = path.join(gameDocsRoot, "Logs", "Script", "Papyrus.0.log");
+  try {
+    const content = await readFile(papyrusPath, "utf8");
+    const papyrusStat = await stat(papyrusPath);
+    const errorLines = content.split(/\r?\n/).filter((line) => /error/i.test(line));
+    for (const line of errorLines.slice(-50)) {
+      entries.push({
+        source: "papyrus",
+        file: papyrusPath,
+        mtime: papyrusStat.mtime.toISOString(),
+        excerpt: line.trim(),
+        mentionedFiles: extractMentionedFiles(line),
+      });
+    }
+  } catch {
+    // No Papyrus log yet — nothing to report from this source.
+  }
+
+  const skseDir = path.join(gameDocsRoot, "SKSE");
+  try {
+    const files = await readdir(skseDir);
+    const crashFiles = files.filter((file) => /^crash-.*\.log$/i.test(file));
+    const withStats = await Promise.all(
+      crashFiles.map(async (file) => ({ file, fileStat: await stat(path.join(skseDir, file)) })),
+    );
+    withStats.sort((a, b) => b.fileStat.mtimeMs - a.fileStat.mtimeMs);
+    const maxCrashLogs = options.maxCrashLogs ?? 3;
+    for (const { file, fileStat } of withStats.slice(0, maxCrashLogs)) {
+      const fullPath = path.join(skseDir, file);
+      const content = await readFile(fullPath, "utf8");
+      const excerpt = content.split(/\r?\n/).slice(0, 15).join("\n");
+      entries.push({
+        source: "crash",
+        file: fullPath,
+        mtime: fileStat.mtime.toISOString(),
+        excerpt,
+        mentionedFiles: extractMentionedFiles(excerpt),
+      });
+    }
+  } catch {
+    // No SKSE folder / no crash logs — nothing to report from this source.
+  }
+
+  return entries;
 }

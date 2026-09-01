@@ -1,6 +1,6 @@
 import path from "node:path";
 import os from "node:os";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -64,6 +64,7 @@ import {
   listModRules,
   listMods,
   listNotifications,
+  listRuntimeErrors,
   purgeMods,
   queryStatePath,
   querySelector,
@@ -1007,5 +1008,69 @@ describe("vortexControl: findMissingMasters", () => {
     });
 
     await expect(findMissingMasters(api)).rejects.toThrow(/not discovered/);
+  });
+});
+
+describe("vortexControl: listRuntimeErrors", () => {
+  let tempRoot: string;
+
+  beforeEach(async () => {
+    tempRoot = await mkdtemp(path.join(os.tmpdir(), "vortex-mcp-test-docs-"));
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    vi.mocked(util.getVortexPath).mockReturnValue(tempRoot);
+  });
+
+  afterEach(async () => {
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  it("reads Papyrus error lines and extracts mentioned mod files", async () => {
+    const papyrusDir = path.join(tempRoot, "My Games", "Skyrim Special Edition", "Logs", "Script");
+    await mkdir(papyrusDir, { recursive: true });
+    await writeFile(
+      path.join(papyrusDir, "Papyrus.0.log"),
+      [
+        "[08/31/2026 - 20:50:04PM] Papyrus log opened",
+        "[08/31/2026 - 20:50:10PM] error: Cannot call GetActorValue() on a None object, aka SomeMod.esp",
+        "[08/31/2026 - 20:50:15PM] all good here",
+      ].join("\r\n"),
+    );
+
+    const entries = await listRuntimeErrors(fakeApi());
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.source).toBe("papyrus");
+    expect(entries[0]?.excerpt).toContain("Cannot call GetActorValue");
+    expect(entries[0]?.mentionedFiles).toEqual(["SomeMod.esp"]);
+  });
+
+  it("returns the newest crash logs first, capped by maxCrashLogs", async () => {
+    const skseDir = path.join(tempRoot, "My Games", "Skyrim Special Edition", "SKSE");
+    await mkdir(skseDir, { recursive: true });
+    await writeFile(path.join(skseDir, "crash-2026-01-01-00-00-00.log"), "old crash\nline2");
+    await writeFile(path.join(skseDir, "crash-2026-06-01-00-00-00.log"), "newer crash\nline2");
+    // Make the mtimes unambiguous regardless of write speed.
+    const old = new Date("2026-01-01T00:00:00Z");
+    const newer = new Date("2026-06-01T00:00:00Z");
+    await Promise.all([
+      utimes(path.join(skseDir, "crash-2026-01-01-00-00-00.log"), old, old),
+      utimes(path.join(skseDir, "crash-2026-06-01-00-00-00.log"), newer, newer),
+    ]);
+
+    const entries = await listRuntimeErrors(fakeApi(), { maxCrashLogs: 1 });
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.source).toBe("crash");
+    expect(entries[0]?.excerpt).toContain("newer crash");
+  });
+
+  it("returns an empty array when no logs exist yet, without throwing", async () => {
+    expect(await listRuntimeErrors(fakeApi())).toEqual([]);
+  });
+
+  it("throws a clear error for a game with no verified save-data folder", async () => {
+    await expect(listRuntimeErrors(fakeApi(), { gameId: "someUnknownGame" })).rejects.toThrow(
+      /Don't know the save-data folder/,
+    );
   });
 });
