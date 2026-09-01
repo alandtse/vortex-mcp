@@ -182,6 +182,59 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "find_mod_by_file",
+    {
+      description:
+        "Find which installed mod(s) contain a file with this name, by scanning mod " +
+        "staging folders on disk (no reflectable API exposes this). Scans only enabled " +
+        "mods by default — fast; pass includeDisabled to search every installed mod " +
+        "instead (much slower for a large modlist, but useful for an orphaned/leftover " +
+        "file whose owning mod isn't currently enabled).",
+      inputSchema: z.object({
+        filename: z.string().describe("Bare file name to search for, e.g. 'texture.dds'"),
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+        includeDisabled: z
+          .boolean()
+          .optional()
+          .describe("Search every installed mod, not just enabled ones (slower)"),
+      }),
+    },
+    async ({ filename, gameId, includeDisabled }) => ({
+      content: [jsonText(await control.findModByFile(api, filename, { gameId, includeDisabled }))],
+    }),
+  );
+
+  server.registerTool(
+    "list_file_conflicts",
+    {
+      description:
+        "List files provided by more than one currently-enabled mod (for the active/given " +
+        "profile) — the read side of conflict resolution; found by scanning mod staging " +
+        "folders on disk, no reflectable API exposes this. Doesn't report a 'winner' — " +
+        "Vortex's actual resolution depends on deploy/rule order in ways not safe to " +
+        "reimplement here. Resolve a conflict via vortex_dispatch: setFileOverride to pick " +
+        "a winning mod for specific files, or addModRule with type 'before'/'after' to " +
+        "control deploy order between two mods.",
+      inputSchema: z.object({
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+        nameFilter: z
+          .string()
+          .optional()
+          .describe("Case-insensitive substring match on the conflicting file's path"),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Cap the number of results returned"),
+      }),
+    },
+    async ({ gameId, nameFilter, limit }) => ({
+      content: [jsonText(await control.listFileConflicts(api, { gameId, nameFilter, limit }))],
+    }),
+  );
+
+  server.registerTool(
     "list_dialogs",
     {
       description:

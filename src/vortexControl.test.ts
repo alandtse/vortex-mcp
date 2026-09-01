@@ -1,6 +1,8 @@
 import path from "node:path";
+import os from "node:os";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@nexusmods/vortex-api", () => ({
   actions: {
@@ -50,11 +52,13 @@ import {
   deployMods,
   describeApi,
   dispatchAction,
+  findModByFile,
   installModFromUrl,
   launchGame,
   listCategories,
   listDialogs,
   listDownloads,
+  listFileConflicts,
   listLoadOrder,
   listModRules,
   listMods,
@@ -795,5 +799,110 @@ describe("vortexControl: listModRules", () => {
     });
 
     expect(() => listModRules(api, "missing")).toThrow(/Unknown mod/);
+  });
+});
+
+describe("vortexControl: findModByFile / listFileConflicts", () => {
+  let tempRoot: string;
+
+  beforeEach(async () => {
+    tempRoot = await mkdtemp(path.join(os.tmpdir(), "vortex-mcp-test-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  async function writeModFile(modFolder: string, relPath: string): Promise<void> {
+    const full = path.join(tempRoot, modFolder, relPath);
+    await mkdir(path.dirname(full), { recursive: true });
+    await writeFile(full, "x");
+  }
+
+  function apiWithMods(
+    mods: Record<string, unknown>,
+    modState: Record<string, { enabled: boolean }>,
+  ) {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    vi.mocked(selectors.activeProfile).mockReturnValue({ gameId: "skyrimse", modState } as never);
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      settings: { mods: { installPath: { skyrimse: tempRoot } } },
+      persistent: { mods: { skyrimse: mods } },
+    });
+    return api;
+  }
+
+  it("findModByFile matches by basename across enabled mods only, by default", async () => {
+    await writeModFile("ModA", path.join("meshes", "foo.nif"));
+    await writeModFile("ModB", "unrelated.txt");
+    const api = apiWithMods(
+      {
+        modA: { id: "modA", installationPath: "ModA" },
+        modB: { id: "modB", installationPath: "ModB" },
+      },
+      { modA: { enabled: true }, modB: { enabled: false } },
+    );
+
+    expect(await findModByFile(api, "foo.nif")).toEqual([
+      {
+        modId: "modA",
+        modName: "modA",
+        relativePath: path.join("meshes", "foo.nif"),
+        enabled: true,
+      },
+    ]);
+  });
+
+  it("findModByFile with includeDisabled also searches disabled mods", async () => {
+    await writeModFile("ModC", "foo.nif");
+    const api = apiWithMods(
+      { modC: { id: "modC", installationPath: "ModC" } },
+      { modC: { enabled: false } },
+    );
+
+    expect(await findModByFile(api, "foo.nif")).toEqual([]);
+    expect(await findModByFile(api, "foo.nif", { includeDisabled: true })).toEqual([
+      { modId: "modC", modName: "modC", relativePath: "foo.nif", enabled: false },
+    ]);
+  });
+
+  it("listFileConflicts reports files provided by more than one enabled mod, not unique ones", async () => {
+    await writeModFile("ModA", path.join("scripts", "shared.pex"));
+    await writeModFile("ModB", path.join("scripts", "shared.pex"));
+    await writeModFile("ModB", "onlyInB.txt");
+    const api = apiWithMods(
+      {
+        modA: { id: "modA", installationPath: "ModA" },
+        modB: { id: "modB", installationPath: "ModB" },
+      },
+      { modA: { enabled: true }, modB: { enabled: true } },
+    );
+
+    const conflicts = await listFileConflicts(api);
+
+    expect(conflicts).toEqual([
+      {
+        file: path.join("scripts", "shared.pex").toLowerCase(),
+        mods: expect.arrayContaining([
+          { id: "modA", name: "modA" },
+          { id: "modB", name: "modB" },
+        ]),
+      },
+    ]);
+  });
+
+  it("listFileConflicts ignores a disabled mod's files entirely", async () => {
+    await writeModFile("ModA", "shared.esp");
+    await writeModFile("ModB", "shared.esp");
+    const api = apiWithMods(
+      {
+        modA: { id: "modA", installationPath: "ModA" },
+        modB: { id: "modB", installationPath: "ModB" },
+      },
+      { modA: { enabled: true }, modB: { enabled: false } },
+    );
+
+    expect(await listFileConflicts(api)).toEqual([]);
   });
 });

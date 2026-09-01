@@ -1,5 +1,6 @@
 import path from "node:path";
 import crypto from "node:crypto";
+import { readdir, stat } from "node:fs/promises";
 
 import { actions, selectors, util, fs, log, types } from "@nexusmods/vortex-api";
 
@@ -697,4 +698,159 @@ export function listModRules(api: IExtensionApi, modId: string, gameId?: string)
       versionMatch: rule.reference.versionMatch,
     };
   });
+}
+
+// Vortex doesn't expose a selector or reflectable API for "which mod owns this file" or
+// "which mods conflict on which files" — the closest event names found via vortex_describe
+// (get-mod-files, update-conflicts-and-rules) are undocumented internal conventions with
+// unknown argument shapes, not safe to guess blindly on a live install. Both questions are
+// answerable directly from data we already have though: each mod's on-disk staging folder
+// (settings.mods.installPath[gameId] + mod.installationPath) is real, present state — so
+// these two functions answer both by scanning the filesystem themselves, the same kind of
+// join list_mods/list_categories/list_mod_rules already do that reflection alone can't.
+
+async function listModFiles(stagingRoot: string, installationPath: string): Promise<string[]> {
+  const modDir = path.join(stagingRoot, installationPath);
+  let entries: string[];
+  try {
+    entries = (await readdir(modDir, { recursive: true })) as string[];
+  } catch {
+    return [];
+  }
+  const files: string[] = [];
+  await Promise.all(
+    entries.map(async (entry) => {
+      try {
+        const entryStat = await stat(path.join(modDir, entry));
+        if (entryStat.isFile()) {
+          files.push(entry);
+        }
+      } catch {
+        // File removed mid-scan or a broken symlink — skip it.
+      }
+    }),
+  );
+  return files;
+}
+
+function stagingRootFor(api: IExtensionApi, gameId: string): string {
+  const stagingRoot = queryStatePath(api, ["settings", "mods", "installPath", gameId]) as
+    | string
+    | undefined;
+  if (stagingRoot === undefined) {
+    throw new Error(`No mod staging path configured for ${gameId}`);
+  }
+  return stagingRoot;
+}
+
+export interface ModFileMatch {
+  modId: string;
+  modName: string;
+  relativePath: string;
+  enabled: boolean;
+}
+
+/**
+ * Finds which installed mod(s) contain a file with this name, by scanning mod staging
+ * folders on disk (see the note above listModFiles). Scans only enabled mods by default —
+ * fast (tens of mods); pass includeDisabled to search every installed mod instead, which
+ * is much slower (a real profile can have hundreds) but useful for hunting down an
+ * orphaned or leftover file whose owning mod isn't currently enabled.
+ */
+export async function findModByFile(
+  api: IExtensionApi,
+  filename: string,
+  options: { gameId?: string; includeDisabled?: boolean } = {},
+): Promise<ModFileMatch[]> {
+  const st = state(api);
+  const targetGameId = options.gameId ?? selectors.activeGameId(st);
+  if (!targetGameId) {
+    throw new Error("No active game and no gameId provided");
+  }
+  const stagingRoot = stagingRootFor(api, targetGameId);
+  const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
+  const profile = selectors.activeProfile(st);
+  const isEnabled = (modId: string): boolean =>
+    profile?.gameId === targetGameId ? (profile?.modState?.[modId]?.enabled ?? false) : false;
+
+  const candidates = Object.values(mods).filter(
+    (mod) => options.includeDisabled === true || isEnabled(mod.id),
+  );
+  const needle = filename.toLowerCase();
+  const matches: ModFileMatch[] = [];
+  await Promise.all(
+    candidates.map(async (mod) => {
+      const files = await listModFiles(stagingRoot, mod.installationPath);
+      for (const relPath of files) {
+        if (path.basename(relPath).toLowerCase() === needle) {
+          matches.push({
+            modId: mod.id,
+            modName: util.renderModName(mod),
+            relativePath: relPath,
+            enabled: isEnabled(mod.id),
+          });
+        }
+      }
+    }),
+  );
+  return matches;
+}
+
+export interface FileConflictEntry {
+  /** Relative path (lowercased) within the deployed mod folder that more than one enabled mod provides. */
+  file: string;
+  mods: { id: string; name: string }[];
+}
+
+/**
+ * Finds files provided by more than one currently-enabled mod (for the active/given
+ * profile) — the read side of conflict resolution; the write side already exists via
+ * vortex_dispatch (setFileOverride to pick a winner, addModRule with type "before"/"after"
+ * to control load/deploy order). Deliberately doesn't report a "winner": Vortex's actual
+ * resolution depends on deploy/rule order in ways not safe to reimplement here — this
+ * just tells you what needs resolving.
+ */
+export async function listFileConflicts(
+  api: IExtensionApi,
+  options: { gameId?: string; nameFilter?: string; limit?: number } = {},
+): Promise<FileConflictEntry[]> {
+  const st = state(api);
+  const targetGameId = options.gameId ?? selectors.activeGameId(st);
+  if (!targetGameId) {
+    throw new Error("No active game and no gameId provided");
+  }
+  const stagingRoot = stagingRootFor(api, targetGameId);
+  const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
+  const profile = selectors.activeProfile(st);
+  const enabledMods =
+    profile?.gameId === targetGameId
+      ? Object.values(mods).filter((mod) => profile?.modState?.[mod.id]?.enabled === true)
+      : [];
+
+  const owners = new Map<string, { id: string; name: string }[]>();
+  await Promise.all(
+    enabledMods.map(async (mod) => {
+      const files = await listModFiles(stagingRoot, mod.installationPath);
+      for (const relPath of files) {
+        const key = relPath.toLowerCase();
+        const list = owners.get(key) ?? [];
+        list.push({ id: mod.id, name: util.renderModName(mod) });
+        owners.set(key, list);
+      }
+    }),
+  );
+
+  const nameFilterLower = options.nameFilter?.toLowerCase();
+  const entries: FileConflictEntry[] = [];
+  for (const [file, ownerList] of owners) {
+    if (ownerList.length < 2) {
+      continue;
+    }
+    if (nameFilterLower !== undefined && !file.includes(nameFilterLower)) {
+      continue;
+    }
+    entries.push({ file, mods: ownerList });
+  }
+  entries.sort((a, b) => a.file.localeCompare(b.file));
+  return options.limit !== undefined ? entries.slice(0, options.limit) : entries;
 }
