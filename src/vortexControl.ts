@@ -192,7 +192,12 @@ const DISPATCHABLE_ACTIONS = new Map<string, string>([
   ["setLoadOrderEntry", "profileId: string, modId: string, loEntry: ILoadOrderEntry"],
   ["setFBLoadOrder", "profileId: string, loadOrder: LoadOrder"],
   ["setFBLoadOrderEntry", "profileId: string, loEntry: ILoadOrderEntry"],
-  ["setPendingPluginSort", "profileId: string, collectionId: string, time: number"],
+  [
+    "setPendingPluginSort",
+    "profileId: string, collectionId: string, time: number " +
+      "(dispatches cleanly but is a no-op unless the Collections extension is active — " +
+      "verify the effect actually landed rather than trusting the dispatch response alone)",
+  ],
   ["clearPendingPluginSort", "profileId: string"],
   [
     "removeProfile",
