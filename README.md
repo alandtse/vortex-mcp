@@ -11,13 +11,15 @@ endpoint, no clicking through the UI.
 Unit- and integration-tested (real HTTP requests against the actual server,
 real Host/Origin/token gating, real MCP `initialize` handshake) — see
 `pnpm run test`. Every read tool and every write tool except
-`install_mod_from_url` has been live-verified against a real Vortex
-install, including a full write cycle (`set_mods_enabled`, `deploy_mods`,
-`purge_mods`, `vortex_dispatch`) against a disposable test profile, with a
-`backup_state` snapshot taken before starting.
+`install_mod_from_url` and `launch_game` has been live-verified against a
+real Vortex install, including a full write cycle (`set_mods_enabled`,
+`deploy_mods`, `purge_mods`, `vortex_dispatch`) against a disposable test
+profile, with a `backup_state` snapshot taken before starting.
 `install_mod_from_url` is deliberately never exercised outside unit tests
 — it can trigger a blocking "choose install type" modal for ambiguous
-archives, unsafe to risk unsupervised.
+archives, unsafe to risk unsupervised. `launch_game` is unit-tested only
+so far — live-verifying it means actually starting the configured game
+process, which needs explicit confirmation before it's exercised for real.
 
 ## Stack
 
@@ -92,6 +94,7 @@ hand-transcribed, so it can't silently drift from the code.
 | `purge_mods`           | write  | Purge (undeploy) all deployed mod files for the active profile.                                                                              |
 | `install_mod_from_url` | write  | Download and install a mod from a URL (e.g. an nxm:// link or direct download URL).                                                          |
 | `activate_game`        | write  | Switch Vortex's active game mode.                                                                                                            |
+| `launch_game`          | write  | Launch a game's configured primary tool (e.g. SKSE, or the vanilla exe if none is set) — the same operation as Vortex's own 'Play' button,…  |
 | `vortex_restart`       | write  | Restart Vortex via its own graceful relaunch (same path as Vortex's 'Restart now' button): closes windows and lets Vortex's normal shutdown… |
 
 <!-- TOOLS_TABLE_END -->
@@ -190,10 +193,10 @@ same-origin.
 **Writes fail closed on `VORTEX_MCP_TOKEN`.** With no token set, only the
 read tools (`vortex_describe`, `vortex_query`, `list_mods`, `list_load_order`,
 `list_categories`, `list_downloads`, `list_notifications`, `list_mod_rules`,
-`list_dialogs`) are ever registered — none of the ten write tools
+`list_dialogs`) are ever registered — none of the eleven write tools
 (`switch_profile`, `clone_profile`, `vortex_dispatch`, `backup_state`,
 `set_mods_enabled`, `deploy_mods`, `purge_mods`, `install_mod_from_url`,
-`activate_game`, `vortex_restart`) exist to call. Set `VORTEX_MCP_TOKEN` to
+`activate_game`, `launch_game`, `vortex_restart`) exist to call. Set `VORTEX_MCP_TOKEN` to
 require `Authorization: Bearer <token>` on every request (reads included)
 _and_ unlock the write tools. There is still no per-tool authorization once
 a token is set — any client holding it has full write privileges, including

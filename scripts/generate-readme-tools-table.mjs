@@ -39,6 +39,7 @@ const ACCESS_TIER = {
   purge_mods: "write",
   install_mod_from_url: "write",
   activate_game: "write",
+  launch_game: "write",
   vortex_restart: "write",
 };
 
