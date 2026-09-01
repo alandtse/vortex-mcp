@@ -75,30 +75,35 @@ hand-transcribed, so it can't silently drift from the code.
 
 <!-- TOOLS_TABLE_START -->
 
-| Tool                   | Access | What it does                                                                                                                                 |
-| ---------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vortex_describe`      | read   | Discover the live Vortex API surface: callable selector names (for vortex_query), the subset of action names actually callable via vortex_d… |
-| `vortex_query`         | read   | Read Vortex state. Two modes: `selector` calls that named vortex-api selector as `(state, ...args)` (e.g. selector='activeProfileId', or se… |
-| `list_mods`            | read   | List mods for a game (defaults to the active game), with friendly names and enabled state for the active profile — a formatted join vortex_… |
-| `list_load_order`      | read   | List the current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index.                                                          |
-| `list_categories`      | read   | List a game's mod categories (defaults to the active game), sorted by display order, with a mod count per category — a join vortex_query ca… |
-| `list_downloads`       | read   | List the download queue/history for a game (defaults to the active game): name, state, progress percent, size — a formatted view raw vortex… |
-| `list_notifications`   | read   | List Vortex's current notifications (errors, warnings, info) — what Vortex itself is currently flagging as a problem, useful for diagnosing… |
-| `list_mod_rules`       | read   | List a mod's dependency/conflict rules (before/after/requires/conflicts/...), resolving each reference to the target mod's friendly name wh… |
-| `find_mod_by_file`     | read   | Find which installed mod(s) contain a file with this name, by scanning mod staging folders on disk (no reflectable API exposes this).        |
-| `list_file_conflicts`  | read   | List files provided by more than one currently-enabled mod (for the active/given profile) — the read side of conflict resolution; found by…  |
-| `list_dialogs`         | read   | List Vortex's currently-open modal dialogs (e.g. a 'files changed outside Vortex' prompt that can block a deploy) — distinct from list_noti… |
-| `switch_profile`       | write  | Switch Vortex to a different profile by id.                                                                                                  |
-| `clone_profile`        | write  | Clone an existing profile into a new one (copies its on-disk profile directory — load order, ini tweaks — plus its mod enabled-state), the…  |
-| `vortex_dispatch`      | write  | Dispatch a named, allowlisted Vortex action creator — mod metadata/rules, categories, load order, deployment settings, download bookkeeping. |
-| `backup_state`         | write  | Create a full snapshot of Vortex's settings/persistent/app/user state as a JSON file in Vortex's own backup folder (%APPDATA%/vortex/temp/s… |
-| `set_mods_enabled`     | write  | Enable or disable a set of mods for a profile (defaults to the active profile).                                                              |
-| `deploy_mods`          | write  | Deploy currently enabled mods for the active profile.                                                                                        |
-| `purge_mods`           | write  | Purge (undeploy) all deployed mod files for the active profile.                                                                              |
-| `install_mod_from_url` | write  | Download and install a mod from a URL (e.g. an nxm:// link or direct download URL).                                                          |
-| `activate_game`        | write  | Switch Vortex's active game mode.                                                                                                            |
-| `launch_game`          | write  | Launch a game's configured primary tool (e.g. SKSE, or the vanilla exe if none is set) — the same operation as Vortex's own 'Play' button,…  |
-| `vortex_restart`       | write  | Restart Vortex via its own graceful relaunch (same path as Vortex's 'Restart now' button): closes windows and lets Vortex's normal shutdown… |
+| Tool                          | Access | What it does                                                                                                                                 |
+| ----------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vortex_describe`             | read   | Discover the live Vortex API surface: callable selector names (for vortex_query), the subset of action names actually callable via vortex_d… |
+| `vortex_query`                | read   | Read Vortex state. Two modes: `selector` calls that named vortex-api selector as `(state, ...args)` (e.g. selector='activeProfileId', or se… |
+| `list_mods`                   | read   | List mods for a game (defaults to the active game), with friendly names and enabled state for the active profile — a formatted join vortex_… |
+| `list_load_order`             | read   | List the current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index.                                                          |
+| `list_categories`             | read   | List a game's mod categories (defaults to the active game), sorted by display order, with a mod count per category — a join vortex_query ca… |
+| `list_downloads`              | read   | List the download queue/history for a game (defaults to the active game): name, state, progress percent, size — a formatted view raw vortex… |
+| `list_notifications`          | read   | List Vortex's current notifications (errors, warnings, info) — what Vortex itself is currently flagging as a problem, useful for diagnosing… |
+| `list_mod_rules`              | read   | List a mod's dependency/conflict rules (before/after/requires/conflicts/...), resolving each reference to the target mod's friendly name wh… |
+| `find_mod_by_file`            | read   | Find which installed mod(s) contain a file with this name, by scanning mod staging folders on disk (no reflectable API exposes this).        |
+| `list_file_conflicts`         | read   | List files provided by more than one currently-enabled mod (for the active/given profile) — the read side of conflict resolution; found by…  |
+| `find_missing_masters`        | read   | Find enabled plugins whose master files aren't themselves enabled — reads each plugin's real TES4 header from the game's Data folder (the B… |
+| `list_runtime_errors`         | read   | Read recent Papyrus error lines and crash log excerpts from the game's real save-data folder (Documents/My Games/<game>) — Vortex has no co… |
+| `list_duplicate_mods`         | read   | Find installed mods that look like duplicates or redundant leftovers — never auto-resolved, purely informational (same 'report candidates,…  |
+| `list_known_mod_conflicts`    | read   | Surfaces real 'conflicts'-type rules Vortex already has recorded on enabled mods (mod.rules — the same field list_mod_rules reads, often po… |
+| `find_missing_deployed_files` | read   | Find plugins where Vortex's load-order state, what's actually deployed to the game's Data folder, and what the game's own plugins.txt says…  |
+| `list_dialogs`                | read   | List Vortex's currently-open modal dialogs (e.g. a 'files changed outside Vortex' prompt that can block a deploy) — distinct from list_noti… |
+| `switch_profile`              | write  | Switch Vortex to a different profile by id.                                                                                                  |
+| `clone_profile`               | write  | Clone an existing profile into a new one (copies its on-disk profile directory — load order, ini tweaks — plus its mod enabled-state), the…  |
+| `vortex_dispatch`             | write  | Dispatch a named, allowlisted Vortex action creator — mod metadata/rules, categories, load order, deployment settings, download bookkeeping. |
+| `backup_state`                | write  | Create a full snapshot of Vortex's settings/persistent/app/user state as a JSON file in Vortex's own backup folder (%APPDATA%/vortex/temp/s… |
+| `set_mods_enabled`            | write  | Enable or disable a set of mods for a profile (defaults to the active profile).                                                              |
+| `deploy_mods`                 | write  | Deploy currently enabled mods for the active profile.                                                                                        |
+| `purge_mods`                  | write  | Purge (undeploy) all deployed mod files for the active profile.                                                                              |
+| `install_mod_from_url`        | write  | Download and install a mod from a URL (e.g. an nxm:// link or direct download URL).                                                          |
+| `activate_game`               | write  | Switch Vortex's active game mode.                                                                                                            |
+| `launch_game`                 | write  | Launch a game's configured primary tool (e.g. SKSE, or the vanilla exe if none is set) — the same operation as Vortex's own 'Play' button,…  |
+| `vortex_restart`              | write  | Restart Vortex via its own graceful relaunch (same path as Vortex's 'Restart now' button): closes windows and lets Vortex's normal shutdown… |
 
 <!-- TOOLS_TABLE_END -->
 
@@ -196,7 +201,9 @@ same-origin.
 **Writes fail closed on `VORTEX_MCP_TOKEN`.** With no token set, only the
 read tools (`vortex_describe`, `vortex_query`, `list_mods`, `list_load_order`,
 `list_categories`, `list_downloads`, `list_notifications`, `list_mod_rules`,
-`find_mod_by_file`, `list_file_conflicts`, `list_dialogs`) are ever registered
+`find_mod_by_file`, `list_file_conflicts`, `find_missing_masters`,
+`list_runtime_errors`, `list_duplicate_mods`, `list_known_mod_conflicts`,
+`find_missing_deployed_files`, `list_dialogs`) are ever registered
 — none of the eleven write tools
 (`switch_profile`, `clone_profile`, `vortex_dispatch`, `backup_state`,
 `set_mods_enabled`, `deploy_mods`, `purge_mods`, `install_mod_from_url`,
