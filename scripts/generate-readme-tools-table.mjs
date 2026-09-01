@@ -30,6 +30,8 @@ const ACCESS_TIER = {
   list_notifications: "read",
   list_mod_rules: "read",
   list_dialogs: "read",
+  find_mod_by_file: "read",
+  list_file_conflicts: "read",
   switch_profile: "write",
   clone_profile: "write",
   vortex_dispatch: "write",
