@@ -175,7 +175,13 @@ const DISPATCHABLE_ACTIONS = new Map<string, string>([
   ["setModState", "gameId: string, modId: string, modState: ModState"],
   ["setModType", "gameId: string, modId: string, type: string"],
   ["setCategory", "gameId: string, id: string, category: ICategory"],
-  ["setCategoryOrder", "gameId: string, categoryIds: string[]"],
+  [
+    "setCategoryOrder",
+    "gameId: string, categoryIds: string[] (the full ordered id list, not just the ones " +
+      "you're moving — re-numbers every category's `order` field 0-indexed by array " +
+      "position on every call. Dispatching the original id list back restores the same " +
+      "relative order but not necessarily the original absolute `order` numbers.)",
+  ],
   ["removeCategory", "gameId: string, id: string"],
   ["renameCategory", "gameId: string, categoryId: string, name: string"],
   ["loadCategories", "gameId: string, gameCategories: ICategoryDictionary"],
