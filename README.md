@@ -10,17 +10,18 @@ endpoint, no clicking through the UI.
 
 Unit- and integration-tested (real HTTP requests against the actual server,
 real Host/Origin/token gating, real MCP `initialize` handshake) — see
-`pnpm run test`. Every read tool and every write tool except
-`install_mod_from_url` has been live-verified against a real Vortex
-install, including a full write cycle (`set_mods_enabled`, `deploy_mods`,
-`purge_mods`, `vortex_dispatch`) against a disposable test profile, with a
-`backup_state` snapshot taken before starting. `launch_game` was live-
-verified end to end — deploy, launch, confirmed the real game process
-came up — with explicit confirmation first, since unlike everything else
-here it has a visible real-world side effect.
-`install_mod_from_url` is deliberately never exercised outside unit tests
-— it can trigger a blocking "choose install type" modal for ambiguous
-archives, unsafe to risk unsupervised.
+`pnpm run test`. Every read tool, and `vortex_dispatch` across all four of
+its fallback tiers (action creator, api.ext function, event — both
+fire-and-forget and `"__CALLBACK__"`-awaited, e.g.
+`action="deploy-mods", args=["__CALLBACK__"]` — and direct api method),
+has been live-verified against a real Vortex install against a disposable
+test profile, with a `backup_state` snapshot taken before starting.
+`launch_game` was live-verified end to end — deploy, launch, confirmed the
+real game process came up — with explicit confirmation first, since unlike
+everything else here it has a visible real-world side effect. The
+`start-download` event (installing a mod from a URL) is deliberately never
+exercised outside unit tests — it can trigger a blocking "choose install
+type" modal for ambiguous archives, unsafe to risk unsupervised.
 
 ## Stack
 
@@ -77,7 +78,7 @@ hand-transcribed, so it can't silently drift from the code.
 
 | Tool                          | Access | What it does                                                                                                                                 |
 | ----------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vortex_describe`             | read   | Discover the live Vortex API surface: callable selector names (for vortex_query), every action/api.ext function name dispatchable via vorte… |
+| `vortex_describe`             | read   | Discover the live Vortex API surface: callable selector names (for vortex_query), every action/api.ext function/event/api method name dispa… |
 | `vortex_query`                | read   | Read Vortex state. Two modes: `selector` calls that named vortex-api selector as `(state, ...args)` (e.g. selector='activeProfileId', or se… |
 | `list_mods`                   | read   | List mods for a game (defaults to the active game), with friendly names and enabled state for the active profile — a formatted join vortex_… |
 | `list_load_order`             | read   | List the current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index.                                                          |
@@ -96,13 +97,9 @@ hand-transcribed, so it can't silently drift from the code.
 | `list_dialogs`                | read   | List Vortex's currently-open modal dialogs (e.g. a 'files changed outside Vortex' prompt that can block a deploy) — distinct from list_noti… |
 | `switch_profile`              | write  | Switch Vortex to a different profile by id.                                                                                                  |
 | `clone_profile`               | write  | Clone an existing profile into a new one (copies its on-disk profile directory — load order, ini tweaks — plus its mod enabled-state), the…  |
-| `vortex_dispatch`             | write  | Dispatch a named Vortex action creator, or — if the name isn't a Redux action — call a named api.ext function instead (e.g. action='nexusGe… |
+| `vortex_dispatch`             | write  | Dispatch a named Vortex action creator, api.ext function, event, or direct api method — tried in that order.                                 |
 | `backup_state`                | write  | Create a full snapshot of Vortex's settings/persistent/app/user state as a JSON file in Vortex's own backup folder (%APPDATA%/vortex/temp/s… |
 | `set_mods_enabled`            | write  | Enable or disable a set of mods for a profile (defaults to the active profile).                                                              |
-| `deploy_mods`                 | write  | Deploy currently enabled mods for the active profile.                                                                                        |
-| `purge_mods`                  | write  | Purge (undeploy) all deployed mod files for the active profile.                                                                              |
-| `install_mod_from_url`        | write  | Download and install a mod from a URL (e.g. an nxm:// link or direct download URL).                                                          |
-| `activate_game`               | write  | Switch Vortex's active game mode.                                                                                                            |
 | `launch_game`                 | write  | Launch a game's configured primary tool (e.g. SKSE, or the vanilla exe if none is set) — the same operation as Vortex's own 'Play' button,…  |
 | `vortex_restart`              | write  | Restart Vortex via its own graceful relaunch (same path as Vortex's 'Restart now' button): closes windows and lets Vortex's normal shutdown… |
 
@@ -117,28 +114,35 @@ rebuild) per selector. `list_mods` stays hand-written because it performs a
 real join (mod ↔ profile enabled-state, friendly name via `renderModName`)
 that reflection can't do in one call.
 
-`vortex_dispatch` extends the same reflection principle to writes: dispatch
-any of Vortex's ~150 `actions` by name, or — if the name isn't a Redux
-action — call a same-named `api.ext.*` function instead (Vortex's own
-built-in Nexus Mods integration, plus anything a third-party extension
-registers the same way). Neither is allowlisted. The security boundary is
-the loopback bind + bearer token (see [Safety](#safety)) — once an operator
-holds the token they already have "full write privileges" per this
-project's own model, matching what a human at Vortex's own UI can already
-do (change game paths, manage extensions/credentials, delete profiles). An
-earlier version gated this behind a hand-curated allowlist excluding
-"admin-level" actions — removed deliberately: it didn't protect against a
-meaningfully different threat than the token already does (an adversary
-holding the token already has `purge_mods`/`install_mod_from_url`/
-`vortex_restart`), it blocked the trusted case (an agent acting on the
-operator's own behalf) for no real gain, and it required manual upkeep for
-every new safe Vortex action. `ACTION_HINTS`/`EXTENSION_API_HINTS` in
-`vortexControl.ts` still exist, but purely as documentation now — real
-positional argument order for the subset this project has verified,
-surfaced via `vortex_describe`'s `dispatchHints`/`extensionApiHints` so a
-caller doesn't need to go read source first. An action or `api.ext`
-function missing from these maps still dispatches fine; you just don't get
-a pre-verified argument order.
+`vortex_dispatch` extends the same reflection principle to writes, trying
+four fallback tiers in order by name: (1) a Redux `actions` creator, (2) a
+same-named `api.ext.*` function (Vortex's own built-in Nexus Mods
+integration, plus anything a third-party extension registers the same
+way), (3) a currently-registered event name, emitted via `api.events.emit`
+— fire-and-forget by default, or awaited to real completion (not just
+"started") when the caller passes a `"__CALLBACK__"` sentinel at the
+position Vortex's own handler expects a Node-style `(err, result?) => void`
+callback (e.g. `action="deploy-mods", args=["__CALLBACK__"]`), and (4) a
+direct method on the `api` object itself (e.g. `translate`,
+`sendNotification`, `runExecutable`). None of the four tiers is
+allowlisted. The security boundary is the loopback bind + bearer token
+(see [Safety](#safety)) — once an operator holds the token they already
+have "full write privileges" per this project's own model, matching what a
+human at Vortex's own UI can already do (change game paths, manage
+extensions/credentials, delete profiles, deploy/purge mods). An earlier
+version gated this behind a hand-curated allowlist excluding "admin-level"
+actions — removed deliberately: it didn't protect against a meaningfully
+different threat than the token already does, it blocked the trusted case
+(an agent acting on the operator's own behalf) for no real gain, and it
+required manual upkeep for every new safe Vortex action or event.
+`ACTION_HINTS`/`EXTENSION_API_HINTS`/`EVENT_HINTS` in `vortexControl.ts`
+still exist, but purely as documentation now — real positional argument
+order (including the `"__CALLBACK__"` position) for the subset this
+project has verified, surfaced via `vortex_describe`'s `dispatchHints`/
+`extensionApiHints`/`eventHints` so a caller doesn't need to go read source
+first. An action, `api.ext` function, event, or api method missing from
+these maps still dispatches fine; you just don't get a pre-verified
+argument order.
 
 `vortex_query` stays genuinely read-only (two modes, `selector`/`path` —
 neither can mutate anything), so it keeps working with no token at all;
@@ -150,15 +154,18 @@ because it does a real join no generic dispatcher can do in one call
 ones before calling `nexusCheckModsVersion`) — the same bar `list_mods`
 already clears.
 
-The remaining hand-written write tools exist because they genuinely aren't
-`actions[name](...args)` or `api.ext[name](...args)` calls: `setModsEnabled`
-takes `api` directly and must be awaited rather than dispatched;
-`deploy_mods`/`purge_mods`/`install_mod_from_url` go through
-`api.events.emit` with inconsistent callback positions per event;
-`clone_profile` is a filesystem copy plus a dispatch. None of that is
-reachable by name-based reflection no matter how uniform the simple case
-gets — the validation and orchestration in those wrappers is the point,
-not boilerplate to genericize away.
+The remaining hand-written write tools exist because they do a genuine
+join or bit of orchestration that name-based reflection can't do in one
+call, not because their underlying operation is unreachable generically:
+`setModsEnabled` takes `api` directly and must be awaited rather than
+dispatched; `clone_profile` is a filesystem copy plus a dispatch;
+`launch_game` resolves the active profile's configured tool through two
+levels of settings state before running it. `deploy_mods`/`purge_mods`/
+`install_mod_from_url`/`activate_game` used to be dedicated wrappers around
+`api.events.emit` for exactly this reason (inconsistent callback positions
+per event), but became fully expressible through `vortex_dispatch`'s event
+fallback tier once it grew the `"__CALLBACK__"` convention, so they were
+removed as dedicated tools.
 
 ### Keeping this table in sync
 
@@ -224,18 +231,18 @@ read tools (`vortex_describe`, `vortex_query`, `list_mods`, `list_load_order`,
 `list_runtime_errors`, `list_duplicate_mods`, `list_known_mod_conflicts`,
 `find_missing_deployed_files`, `check_nexus_mod_updates`,
 `list_dialogs`) are ever registered
-— none of the eleven write tools
+— none of the seven write tools
 (`switch_profile`, `clone_profile`, `vortex_dispatch`, `backup_state`,
-`set_mods_enabled`, `deploy_mods`, `purge_mods`, `install_mod_from_url`,
-`activate_game`, `launch_game`, `vortex_restart`) exist to call. Set `VORTEX_MCP_TOKEN` to
+`set_mods_enabled`, `launch_game`, `vortex_restart`) exist to call. Set `VORTEX_MCP_TOKEN` to
 require `Authorization: Bearer <token>` on every request (reads included)
 _and_ unlock the write tools. There is no per-tool authorization once a
 token is set — any client holding it has full write privileges, including
-`purge_mods` (deletes deployed game files), `install_mod_from_url`
-(downloads and installs arbitrary content), `vortex_restart` (kills and
-relaunches the whole app), and — via `vortex_dispatch` — every Redux action
-and `api.ext` function Vortex has, including ones that touch game/install
-paths, extensions, and credentials. This is deliberate, not an oversight:
+`vortex_restart` (kills and relaunches the whole app), and — via
+`vortex_dispatch` — every Redux action, `api.ext` function, event (e.g.
+`purge-mods`, which deletes deployed game files, or `start-download`,
+which downloads and installs arbitrary content), and direct api method
+Vortex has, including ones that touch game/install paths, extensions, and
+credentials. This is deliberate, not an oversight:
 the token is meant to represent the same trust a human already has at
 Vortex's own UI, so there's no further curated allowlist narrowing what an
 authenticated caller can do (see the `vortex_dispatch` section above for
