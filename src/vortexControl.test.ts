@@ -59,6 +59,7 @@ import {
   listCategories,
   listDialogs,
   listDownloads,
+  listDuplicateMods,
   listFileConflicts,
   listLoadOrder,
   listModRules,
@@ -1072,5 +1073,131 @@ describe("vortexControl: listRuntimeErrors", () => {
     await expect(listRuntimeErrors(fakeApi(), { gameId: "someUnknownGame" })).rejects.toThrow(
       /Don't know the save-data folder/,
     );
+  });
+});
+
+describe("vortexControl: listDuplicateMods", () => {
+  let tempRoot: string;
+
+  beforeEach(async () => {
+    tempRoot = await mkdtemp(path.join(os.tmpdir(), "vortex-mcp-test-dup-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempRoot, { recursive: true, force: true });
+  });
+
+  async function writeModFile(modFolder: string, relPath: string): Promise<void> {
+    const full = path.join(tempRoot, modFolder, relPath);
+    await mkdir(path.dirname(full), { recursive: true });
+    await writeFile(full, "x");
+  }
+
+  function apiWithMods(
+    mods: Record<string, unknown>,
+    modState: Record<string, { enabled: boolean }>,
+  ) {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    vi.mocked(selectors.activeProfile).mockReturnValue({ gameId: "skyrimse", modState } as never);
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      settings: { mods: { installPath: { skyrimse: tempRoot } } },
+      persistent: { mods: { skyrimse: mods } },
+    });
+    return api;
+  }
+
+  it("flags more than one installed mod sharing the same Nexus mod id", async () => {
+    await writeModFile("ModA", "a.esp");
+    await writeModFile("ModB", "b.esp");
+    const api = apiWithMods(
+      {
+        modA: {
+          id: "modA",
+          installationPath: "ModA",
+          attributes: { source: "nexus", modId: 12345 },
+        },
+        modB: {
+          id: "modB",
+          installationPath: "ModB",
+          attributes: { source: "nexus", modId: 12345 },
+        },
+      },
+      { modA: { enabled: true }, modB: { enabled: true } },
+    );
+
+    const groups = await listDuplicateMods(api);
+
+    expect(groups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: "same-nexus-id",
+          mods: expect.arrayContaining([
+            { id: "modA", name: "modA" },
+            { id: "modB", name: "modB" },
+          ]),
+        }),
+      ]),
+    );
+  });
+
+  it("does not flag mods with different Nexus ids or non-Nexus sources", async () => {
+    await writeModFile("ModA", "a.esp");
+    await writeModFile("ModB", "b.esp");
+    const api = apiWithMods(
+      {
+        modA: {
+          id: "modA",
+          installationPath: "ModA",
+          attributes: { source: "nexus", modId: 111 },
+        },
+        modB: { id: "modB", installationPath: "ModB", attributes: { source: "manual" } },
+      },
+      { modA: { enabled: true }, modB: { enabled: true } },
+    );
+
+    expect(await listDuplicateMods(api)).toEqual([]);
+  });
+
+  it("flags a mod whose entire file set is a subset of a larger mod's", async () => {
+    await writeModFile("BigMod", "meshes/a.nif");
+    await writeModFile("BigMod", "textures/a.dds");
+    await writeModFile("BigMod", "plugin.esp");
+    await writeModFile("OldVersion", "meshes/a.nif");
+    const api = apiWithMods(
+      {
+        bigMod: { id: "bigMod", installationPath: "BigMod" },
+        oldVersion: { id: "oldVersion", installationPath: "OldVersion" },
+      },
+      { bigMod: { enabled: true }, oldVersion: { enabled: true } },
+    );
+
+    const groups = await listDuplicateMods(api);
+
+    expect(groups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: "file-subset",
+          mods: [
+            { id: "bigMod", name: "bigMod" },
+            { id: "oldVersion", name: "oldVersion" },
+          ],
+        }),
+      ]),
+    );
+  });
+
+  it("does not flag mods with disjoint file sets", async () => {
+    await writeModFile("ModA", "unique-a.esp");
+    await writeModFile("ModB", "unique-b.esp");
+    const api = apiWithMods(
+      {
+        modA: { id: "modA", installationPath: "ModA" },
+        modB: { id: "modB", installationPath: "ModB" },
+      },
+      { modA: { enabled: true }, modB: { enabled: true } },
+    );
+
+    expect(await listDuplicateMods(api)).toEqual([]);
   });
 });

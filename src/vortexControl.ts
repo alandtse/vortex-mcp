@@ -1070,3 +1070,102 @@ export async function listRuntimeErrors(
 
   return entries;
 }
+
+export type DuplicateModReason = "same-nexus-id" | "file-subset";
+
+export interface DuplicateModGroup {
+  reason: DuplicateModReason;
+  mods: { id: string; name: string }[];
+  detail: string;
+}
+
+/**
+ * Finds installed mods that look like duplicates or redundant leftovers — never
+ * auto-resolved, purely informational (same "report candidates, don't decide" stance as
+ * list_file_conflicts). Two independent checks:
+ *  - same-nexus-id: more than one installed mod sharing the same Nexus mod.attributes.modId
+ *    (metadata-only, cheap, runs across the full candidate set).
+ *  - file-subset: mod B's entire file set is contained in mod A's — usually an old/
+ *    redundant version left installed. O(n^2) file-set comparisons, so scanning every
+ *    installed mod (includeDisabled) can be slow for a large modlist; enabled-only (the
+ *    default) is fast.
+ */
+export async function listDuplicateMods(
+  api: IExtensionApi,
+  options: { gameId?: string; includeDisabled?: boolean } = {},
+): Promise<DuplicateModGroup[]> {
+  const st = state(api);
+  const targetGameId = options.gameId ?? selectors.activeGameId(st);
+  if (!targetGameId) {
+    throw new Error("No active game and no gameId provided");
+  }
+  const stagingRoot = stagingRootFor(api, targetGameId);
+  const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
+  const profile = selectors.activeProfile(st);
+  const isEnabled = (modId: string): boolean =>
+    profile?.gameId === targetGameId ? (profile?.modState?.[modId]?.enabled ?? false) : false;
+  const candidates = Object.values(mods).filter(
+    (mod) => options.includeDisabled === true || isEnabled(mod.id),
+  );
+
+  const groups: DuplicateModGroup[] = [];
+
+  const byNexusId = new Map<string, IMod[]>();
+  for (const mod of candidates) {
+    const attrs = mod.attributes as { source?: string; modId?: string | number } | undefined;
+    if (attrs?.source !== "nexus" || attrs.modId === undefined) {
+      continue;
+    }
+    const key = String(attrs.modId);
+    const list = byNexusId.get(key) ?? [];
+    list.push(mod);
+    byNexusId.set(key, list);
+  }
+  for (const [nexusId, modsForId] of byNexusId) {
+    if (modsForId.length > 1) {
+      groups.push({
+        reason: "same-nexus-id",
+        mods: modsForId.map((mod) => ({ id: mod.id, name: util.renderModName(mod) })),
+        detail: `Nexus mod id ${nexusId} installed ${modsForId.length} times`,
+      });
+    }
+  }
+
+  const fileSets = new Map<string, Set<string>>();
+  await Promise.all(
+    candidates.map(async (mod) => {
+      const files = await listModFiles(stagingRoot, mod.installationPath);
+      fileSets.set(mod.id, new Set(files.map((file) => file.toLowerCase())));
+    }),
+  );
+  for (const outer of candidates) {
+    for (const inner of candidates) {
+      if (outer.id === inner.id) {
+        continue;
+      }
+      const outerFiles = fileSets.get(outer.id);
+      const innerFiles = fileSets.get(inner.id);
+      if (
+        outerFiles === undefined ||
+        innerFiles === undefined ||
+        innerFiles.size === 0 ||
+        innerFiles.size >= outerFiles.size
+      ) {
+        continue;
+      }
+      const isSubset = [...innerFiles].every((file) => outerFiles.has(file));
+      if (isSubset) {
+        groups.push({
+          reason: "file-subset",
+          mods: [
+            { id: outer.id, name: util.renderModName(outer) },
+            { id: inner.id, name: util.renderModName(inner) },
+          ],
+          detail: `${util.renderModName(inner)}'s files are all present in ${util.renderModName(outer)}`,
+        });
+      }
+    }
+  }
+
+  return groups;
+}

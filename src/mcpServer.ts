@@ -282,6 +282,30 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "list_duplicate_mods",
+    {
+      description:
+        "Find installed mods that look like duplicates or redundant leftovers — never " +
+        "auto-resolved, purely informational (same 'report candidates, don't decide' " +
+        "stance as list_file_conflicts). Two checks: more than one installed mod sharing " +
+        "the same Nexus mod id (metadata-only, cheap), and mods whose entire file set is " +
+        "contained in another mod's (usually an old/redundant version left installed). " +
+        "Scans only enabled mods by default — fast; includeDisabled searches every " +
+        "installed mod instead (much slower for a large modlist).",
+      inputSchema: z.object({
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+        includeDisabled: z
+          .boolean()
+          .optional()
+          .describe("Search every installed mod, not just enabled ones (slower)"),
+      }),
+    },
+    async ({ gameId, includeDisabled }) => ({
+      content: [jsonText(await control.listDuplicateMods(api, { gameId, includeDisabled }))],
+    }),
+  );
+
+  server.registerTool(
     "list_dialogs",
     {
       description:
