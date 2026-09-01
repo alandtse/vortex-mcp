@@ -1230,17 +1230,27 @@ export interface DeploymentDiscrepancy {
   vortexEnabled: boolean;
   /** Whether the plugin file actually exists in the game's Data folder. */
   existsInDataFolder: boolean;
-  /** Whether the game's own plugins.txt marks this plugin active (the "*" prefix). */
-  activeInPluginsTxt: boolean;
+  /**
+   * Whether the game's own plugins.txt marks this plugin active (the "*" prefix).
+   * `null` when the plugin isn't listed in plugins.txt at all — confirmed live: game/DLC
+   * masters (Skyrim.esm, Update.esm, ...) are activated implicitly by the engine and
+   * never appear there, so "not listed" must NOT be treated as "inactive" or every
+   * master would show as a permanent false discrepancy. (A plain JS `undefined` here
+   * would be silently dropped by JSON.stringify on an object property — unlike the
+   * top-level jsonText() case, this needs an explicit null to stay visible on the wire.)
+   */
+  activeInPluginsTxt: boolean | null;
 }
 
 /**
  * Finds plugins where Vortex's load-order state, what's actually deployed to the game's
  * Data folder, and what the game's own plugins.txt says is active all disagree — reads
  * both real files directly rather than trusting Vortex's in-memory state alone, since a
- * deploy can silently partially fail. Reports raw discrepancies only (all three booleans
- * per entry), no verdict about which one is "right" — matches list_file_conflicts'
- * stance. Only supports games with a verified save-data folder name (see MY_GAMES_FOLDER).
+ * deploy can silently partially fail. plugins.txt lives under LOCALAPPDATA (confirmed
+ * live — NOT Documents/My Games, an initial guess that was wrong), in a folder matching
+ * MY_GAMES_FOLDER's name. Reports raw discrepancies only, no verdict about which source
+ * is "right" — matches list_file_conflicts' stance. Only supports games with a verified
+ * save-data folder name (see MY_GAMES_FOLDER).
  */
 export async function findMissingDeployedFiles(
   api: IExtensionApi,
@@ -1269,8 +1279,8 @@ export async function findMissingDeployedFiles(
     throw new Error(`Game ${targetGameId} is not discovered (no installation path known).`);
   }
   const dataDir = path.join(gamePath, "Data");
-  const documentsPath = util.getVortexPath("documents");
-  const pluginsTxtPath = path.join(documentsPath, "My Games", myGamesFolder, "plugins.txt");
+  const localAppData = util.getVortexPath("localAppData");
+  const pluginsTxtPath = path.join(localAppData, myGamesFolder, "plugins.txt");
 
   const pluginsTxtActive = new Map<string, { active: boolean; displayName: string }>();
   try {
@@ -1285,7 +1295,7 @@ export async function findMissingDeployedFiles(
       pluginsTxtActive.set(plugin.toLowerCase(), { active, displayName: plugin });
     }
   } catch {
-    // No plugins.txt yet (never deployed/launched) — every plugin will show as inactive.
+    // No plugins.txt yet (never deployed/launched) — every plugin is treated as not listed.
   }
 
   const loadOrder = listLoadOrder(api);
@@ -1299,15 +1309,15 @@ export async function findMissingDeployedFiles(
       const txtEntry = pluginsTxtActive.get(key);
       const plugin = loadOrderEntry?.plugin ?? txtEntry?.displayName ?? key;
       const vortexEnabled = loadOrderEntry?.enabled ?? false;
-      const activeInPluginsTxt = txtEntry?.active ?? false;
+      const activeInPluginsTxt = txtEntry?.active ?? null;
       const existsInDataFolder = await stat(path.join(dataDir, plugin))
         .then((s) => s.isFile())
         .catch(() => false);
-      if (
+      const mismatch =
         vortexEnabled !== existsInDataFolder ||
-        vortexEnabled !== activeInPluginsTxt ||
-        existsInDataFolder !== activeInPluginsTxt
-      ) {
+        (activeInPluginsTxt !== null &&
+          (vortexEnabled !== activeInPluginsTxt || existsInDataFolder !== activeInPluginsTxt));
+      if (mismatch) {
         discrepancies.push({ plugin, vortexEnabled, existsInDataFolder, activeInPluginsTxt });
       }
     }),

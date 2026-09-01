@@ -330,10 +330,12 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
         "Find plugins where Vortex's load-order state, what's actually deployed to the " +
         "game's Data folder, and what the game's own plugins.txt says is active all " +
         "disagree — reads both real files directly rather than trusting Vortex's " +
-        "in-memory state alone, since a deploy can silently partially fail. Reports raw " +
-        "discrepancies only (all three booleans per entry), no verdict about which one " +
-        "is 'right'. Only supports games with a verified save-data folder name " +
-        "(currently skyrimse, skyrimvr).",
+        "in-memory state alone, since a deploy can silently partially fail. " +
+        "`activeInPluginsTxt` is `null` when the plugin isn't listed there at all — " +
+        "normal for game/DLC masters, which the engine activates implicitly without an " +
+        "entry, so that's never itself a discrepancy. No verdict about which source is " +
+        "'right'. Only supports games with a verified save-data folder name (currently " +
+        "skyrimse, skyrimvr).",
       inputSchema: z.object({
         gameId: z.string().optional().describe("Game id; defaults to the active game"),
       }),

@@ -1326,7 +1326,9 @@ describe("vortexControl: findMissingDeployedFiles", () => {
   }
 
   async function writePluginsTxt(lines: string[]): Promise<void> {
-    const dir = path.join(docsRoot, "My Games", "Skyrim Special Edition");
+    // Mirrors the real location: <localAppData>/<myGamesFolder>/plugins.txt (util.getVortexPath
+    // is mocked to docsRoot standing in for localAppData here).
+    const dir = path.join(docsRoot, "Skyrim Special Edition");
     await mkdir(dir, { recursive: true });
     await writeFile(path.join(dir, "plugins.txt"), lines.join("\r\n"));
   }
@@ -1376,5 +1378,21 @@ describe("vortexControl: findMissingDeployedFiles", () => {
         activeInPluginsTxt: true,
       },
     ]);
+  });
+
+  it("does not flag a master that's enabled+deployed but absent from plugins.txt", async () => {
+    // Regression test: found live that game/DLC masters (Skyrim.esm, Update.esm, ...) are
+    // activated implicitly by the engine and never appear in plugins.txt at all -- an
+    // earlier version of this function treated "not listed" the same as "listed inactive"
+    // and would have flagged every single master as a permanent false discrepancy.
+    await writeFile(path.join(gameRoot, "Data", "Skyrim.esm"), "x");
+    await writeFile(path.join(gameRoot, "Data", "Dawnguard.esm"), "x");
+    await writePluginsTxt([]); // no entries at all -- neither master is listed
+    const api = apiWithLoadOrder({
+      "Skyrim.esm": { loadOrder: 0, enabled: true },
+      "Dawnguard.esm": { loadOrder: 1, enabled: true },
+    });
+
+    expect(await findMissingDeployedFiles(api)).toEqual([]);
   });
 });
