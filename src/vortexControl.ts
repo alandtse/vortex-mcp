@@ -136,11 +136,17 @@ export function queryStatePath(api: IExtensionApi, statePath: string[]): unknown
 }
 
 // Standard user-tooling actions only: mod metadata/rules, categories, load order,
-// deployment settings, and download bookkeeping. Deliberately excludes anything
-// admin-level — game/install/download *paths*, extensions (install/enable/remove),
-// credentials/auth, profile deletion, window/network state — even though those are
-// otherwise plain action creators the same reflection mechanism could reach. This
-// allowlist is the actual enforcement boundary, not just a documentation note.
+// deployment settings, download bookkeeping, and profile lifecycle. Deliberately
+// excludes anything admin-level — game/install/download *paths*, extensions
+// (install/enable/remove), credentials/auth, window/network state — even though
+// those are otherwise plain action creators the same reflection mechanism could
+// reach. This allowlist is the actual enforcement boundary, not just a
+// documentation note.
+//
+// removeProfile is admin-adjacent (permanently deletes the profile's on-disk
+// directory, no undo) and included deliberately: it's the only way to clean up
+// disposable profiles clone_profile creates for testing. Only ever call it on a
+// profile you created for that purpose — never a real user profile.
 //
 // The value is the real positional argument order (name: type), read from
 // @nexusmods/vortex-api's action-creator payload field names — or, for the three
@@ -182,6 +188,12 @@ const DISPATCHABLE_ACTIONS = new Map<string, string>([
   ["setFBLoadOrderEntry", "profileId: string, loEntry: ILoadOrderEntry"],
   ["setPendingPluginSort", "profileId: string, collectionId: string, time: number"],
   ["clearPendingPluginSort", "profileId: string"],
+  [
+    "removeProfile",
+    "profileId: string " +
+      "(permanently deletes the profile's on-disk directory — no undo. Only ever call " +
+      "this on a profile you created yourself, e.g. via clone_profile, for testing.)",
+  ],
   ["setActivator", "gameId: string, activatorId: string"],
   ["setAutoDeployment", "deploy: boolean"],
   ["setCleanupOnDeploy", "cleanup: boolean"],
@@ -206,7 +218,7 @@ export function dispatchAction(api: IExtensionApi, name: string, args: unknown[]
   if (!DISPATCHABLE_ACTIONS.has(name)) {
     throw new Error(
       `Action not allowlisted for dispatch: ${name}. This tool covers standard mod-management ` +
-        "actions only, not admin-level ones (paths, extensions, credentials, profile deletion).",
+        "actions only, not admin-level ones (paths, extensions, credentials).",
     );
   }
   const fn = (actions as Record<string, unknown>)[name];

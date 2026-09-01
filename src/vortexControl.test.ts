@@ -9,6 +9,7 @@ vi.mock("@nexusmods/vortex-api", () => ({
     setProfile: vi.fn((profile: unknown) => ({ type: "SET_PROFILE", payload: profile })),
     setLoadOrder: vi.fn((order: unknown) => ({ type: "SET_LOAD_ORDER", payload: order })),
     setGamePath: vi.fn((gamePath: unknown) => ({ type: "SET_GAME_PATH", payload: gamePath })),
+    removeProfile: vi.fn((profileId: string) => ({ type: "REMOVE_PROFILE", payload: profileId })),
   },
   selectors: {
     activeProfileId: vi.fn<() => string | undefined>(),
@@ -492,6 +493,15 @@ describe("vortexControl: dispatchAction", () => {
 
   it("rejects an unknown action name", () => {
     expect(() => dispatchAction(fakeApi(), "totallyMadeUp")).toThrow(/not allowlisted/);
+  });
+
+  it("allows removeProfile (the one admin-adjacent exception, for cleaning up clone_profile output)", () => {
+    const dispatch = vi.fn();
+
+    const result = dispatchAction(fakeApi({ dispatch }), "removeProfile", ["clone-id"]);
+
+    expect(actions.removeProfile).toHaveBeenCalledWith("clone-id");
+    expect(result).toEqual({ type: "REMOVE_PROFILE", payload: "clone-id" });
   });
 });
 
