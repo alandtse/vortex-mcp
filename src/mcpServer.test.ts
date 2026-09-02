@@ -225,6 +225,25 @@ describe("mcpServer HTTP gating", () => {
     expect(res.body).toContain("Provide either");
   });
 
+  it("list_mod_rules rejects an empty modId with a clear message instead of 'Unknown mod: '", async () => {
+    // Found live: modId as a plain z.string() let an empty string through schema
+    // validation, reaching control.listModRules and producing "Unknown mod: " with
+    // nothing after the colon — technically correct but reads like "not found" rather
+    // than "modId is required".
+    const res = await request({
+      headers: jsonHeaders,
+      body: {
+        jsonrpc: "2.0",
+        id: 5,
+        method: "tools/call",
+        params: { name: "list_mod_rules", arguments: { modId: "" } },
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toContain("modId is required");
+    expect(res.body).not.toContain("Unknown mod");
+  });
+
   // Redacted at the jsonText funnel in mcpServer.ts, by provenance from state.confidential
   // — not by name-gating the `apiKey` selector or blocking a `confidential`-prefixed path
   // (see vortexControl's own selector/path reflection, which stays name-agnostic).

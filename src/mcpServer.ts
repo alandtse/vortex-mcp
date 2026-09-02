@@ -287,7 +287,10 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
         "resolving each reference to the target mod's friendly name when it's installed — " +
         "a join vortex_query can't do in one call.",
       inputSchema: z.object({
-        modId: z.string().describe("Mod id (query list_mods to find one)"),
+        modId: z
+          .string()
+          .min(1, "modId is required (query list_mods to find one)")
+          .describe("Mod id (query list_mods to find one)"),
         gameId: z.string().optional().describe("Game id; defaults to the active game"),
       }),
     },

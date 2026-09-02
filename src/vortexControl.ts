@@ -227,6 +227,20 @@ const SELECTOR_HINTS = new Map<string, string>([
       'For "what games are actually installed/discovered" (almost always what\'s wanted), ' +
       "use selector='discovered' instead — far smaller, real install paths only.",
   ],
+  [
+    "profiles",
+    "Every profile's FULL per-mod enabled state (id -> IProfile, including modState) — " +
+      "found live to run past 800K characters and blow the response size limit, even for " +
+      "a single game. Use the list_profiles tool instead for id/name/gameId/active/" +
+      "modCount without the full state dump.",
+  ],
+  [
+    "gameProfiles",
+    "Despite taking a gameId argument, found live to return the exact same payload " +
+      "(byte-identical, confirmed with two different gameId values) regardless of what's " +
+      "passed — it does not filter by game. Same size problem as `profiles` on top of " +
+      "that. Use the list_profiles tool (which does filter correctly by gameId) instead.",
+  ],
 ]);
 
 // NOT an allowlist — every one of Vortex's ~150 action creators is dispatchable via

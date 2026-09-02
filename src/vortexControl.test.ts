@@ -120,6 +120,7 @@ describe("vortexControl: reflection", () => {
     expect(result.eventHints["deploy-mods"]).toContain("__CALLBACK__");
     expect(result.listenerHints.onStateChange).toContain("__CALLBACK__");
     expect(result.selectorHints.knownGames).toContain("discovered");
+    expect(result.selectorHints.gameProfiles).toContain("does not filter");
   });
 
   it("describeApi surfaces api.ext names as extensionApis without exposing the functions", () => {
