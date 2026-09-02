@@ -87,7 +87,7 @@ hand-transcribed, so it can't silently drift from the code.
 
 | Tool                          | Access | What it does                                                                                                                                 |
 | ----------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `vortex_describe`             | read   | Discover the live Vortex API surface: callable selector names (for vortex_query), every action/api.ext function/event/api method name dispa… |
+| `vortex_describe`             | read   | Discover the live Vortex API surface: callable selector names (for vortex_query, with known caveats in `selectorHints`, e.g. selectorHints.… |
 | `vortex_query`                | read   | Read Vortex state. Two modes: `selector` calls that named vortex-api selector as `(state, ...args)` (e.g. selector='activeProfileId', or se… |
 | `list_profiles`               | read   | List Vortex profiles (defaults to every game; pass gameId to filter to one), with name, active status, and mod counts — a formatted join vo… |
 | `list_mods`                   | read   | List mods for a game (defaults to the active game), with friendly names and enabled state for the active profile — a formatted join vortex_… |

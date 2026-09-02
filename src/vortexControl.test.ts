@@ -112,6 +112,7 @@ describe("vortexControl: reflection", () => {
     expect(result.extensionApiHints.nexusGetModInfo).toContain("gameId: string");
     expect(result.eventHints["deploy-mods"]).toContain("__CALLBACK__");
     expect(result.listenerHints.onStateChange).toContain("__CALLBACK__");
+    expect(result.selectorHints.knownGames).toContain("discovered");
   });
 
   it("describeApi surfaces api.ext names as extensionApis without exposing the functions", () => {

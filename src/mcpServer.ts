@@ -104,20 +104,23 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
     "vortex_describe",
     {
       description:
-        "Discover the live Vortex API surface: callable selector names (for vortex_query), " +
-        "every action/api.ext function/event/api method name dispatchable via vortex_dispatch " +
-        "(`actions`/`extensionApis`/`eventNames`/`apiMethods` — all of these are callable, no " +
-        "allowlist; the loopback bind + bearer token is the real security boundary), with real " +
-        "positional argument order for the ones this project has verified (`dispatchHints`/" +
-        "`extensionApiHints`/`eventHints`/`listenerHints`, e.g. dispatchHints.setModEnabled = " +
-        '"profileId: string, modId: string, enable: boolean" — missing from these maps just ' +
-        "means no pre-verified arg order, not that it's unavailable; eventHints/listenerHints " +
-        'also document the "__CALLBACK__" sentinel position for the few events/apiMethods ' +
-        "that need one — a listenerHints entry means that apiMethod registers a persistent " +
-        "listener instead of performing a one-off action; see poll_listener), and top-level " +
-        "Redux state keys (for vortex_query's path mode, includes state added by any loaded " +
-        "extension, not just core Vortex). Reflects whatever Vortex is actually running right " +
-        "now — new selectors/actions/events/state show up here without an extension rebuild.",
+        "Discover the live Vortex API surface: callable selector names (for vortex_query, " +
+        "with known caveats in `selectorHints`, e.g. selectorHints.knownGames warns it's a " +
+        "5000-entry catalog that blows the response limit and points at 'discovered' " +
+        "instead), every action/api.ext function/event/api method name dispatchable via " +
+        "vortex_dispatch (`actions`/`extensionApis`/`eventNames`/`apiMethods` — all of these " +
+        "are callable, no allowlist; the loopback bind + bearer token is the real security " +
+        "boundary), with real positional argument order for the ones this project has " +
+        "verified (`dispatchHints`/`extensionApiHints`/`eventHints`/`listenerHints`, e.g. " +
+        'dispatchHints.setModEnabled = "profileId: string, modId: string, enable: boolean" ' +
+        "— missing from these maps just means no pre-verified arg order/caveat, not that " +
+        'it\'s unavailable; eventHints/listenerHints also document the "__CALLBACK__" ' +
+        "sentinel position for the few events/apiMethods that need one — a listenerHints " +
+        "entry means that apiMethod registers a persistent listener instead of performing a " +
+        "one-off action; see poll_listener), and top-level Redux state keys (for " +
+        "vortex_query's path mode, includes state added by any loaded extension, not just " +
+        "core Vortex). Reflects whatever Vortex is actually running right now — new " +
+        "selectors/actions/events/state show up here without an extension rebuild.",
       inputSchema: z.object({}),
     },
     async () => ({

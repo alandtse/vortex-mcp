@@ -87,6 +87,12 @@ export interface ApiDescription {
   /** Names callable via query({ selector, args }) — each is (state, ...args) => value. */
   selectors: string[];
   /**
+   * Notes for the selectors this project has verified are easy to reach for and get
+   * wrong — same "documentation, not a gate" role as dispatchHints. A selector missing
+   * here is still fully callable; you just don't get a pre-verified caveat.
+   */
+  selectorHints: Record<string, string>;
+  /**
    * All of Vortex's action-creator names — every one of these is dispatchable via
    * vortex_dispatch. The loopback bind + bearer token is the actual security boundary
    * (matches what a human at Vortex's own UI can already do); there is no further
@@ -149,6 +155,7 @@ export function describeApi(api: IExtensionApi): ApiDescription {
   const apiRecord = api as unknown as Record<string, unknown>;
   return {
     selectors: Object.keys(selectors).toSorted(),
+    selectorHints: Object.fromEntries(SELECTOR_HINTS),
     actions: Object.keys(actions).toSorted(),
     dispatchHints: Object.fromEntries(ACTION_HINTS),
     stateKeys: Object.keys(st as object).toSorted(),
@@ -186,6 +193,18 @@ export function queryStatePath(api: IExtensionApi, statePath: string[]): unknown
   }
   return value;
 }
+
+// Pure documentation, same "verified subset, not a gate" shape as ACTION_HINTS below —
+// a selector missing here still queries fine, you just don't get a pre-verified caveat.
+const SELECTOR_HINTS = new Map<string, string>([
+  [
+    "knownGames",
+    "Vortex's full static game catalog (~5000 entries, every game Vortex ships support " +
+      "for) — found live to run past 60K characters and blow the response size limit. " +
+      'For "what games are actually installed/discovered" (almost always what\'s wanted), ' +
+      "use selector='discovered' instead — far smaller, real install paths only.",
+  ],
+]);
 
 // NOT an allowlist — every one of Vortex's ~150 action creators is dispatchable via
 // vortex_dispatch (see dispatchAction below). This map is pure documentation: the real
