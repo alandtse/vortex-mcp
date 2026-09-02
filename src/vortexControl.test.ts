@@ -1687,6 +1687,46 @@ describe("vortexControl: listKnownModConflicts", () => {
       },
     ]);
   });
+
+  it("surfaces versionMatch to distinguish two same-file-version-guard rules that would otherwise look identical", () => {
+    // Found live: a mod can carry two "conflicts" rules against its own logicalFileName,
+    // one per incompatible version range, distinguishable only by reference.versionMatch.
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    vi.mocked(selectors.activeProfile).mockReturnValue({
+      gameId: "skyrimse",
+      modState: { modA: { enabled: true } },
+    } as never);
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: {
+            modA: {
+              id: "modA",
+              type: "",
+              installationPath: "",
+              rules: [
+                {
+                  type: "conflicts",
+                  comment: "Incompatible Script Extender",
+                  reference: { logicalFileName: "SKSEVR", versionMatch: "<2.0.12||>2.0.12" },
+                },
+                {
+                  type: "conflicts",
+                  comment: "Incompatible Script Extender",
+                  reference: { logicalFileName: "SKSEVR", versionMatch: "<2.0.11||>2.0.11" },
+                },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    const result = listKnownModConflicts(api);
+    expect(result).toHaveLength(2);
+    expect(result.map((r) => r.versionMatch)).toEqual(["<2.0.12||>2.0.12", "<2.0.11||>2.0.11"]);
+  });
 });
 
 describe("vortexControl: findMissingDeployedFiles", () => {

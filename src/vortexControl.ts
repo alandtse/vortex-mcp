@@ -66,6 +66,12 @@ export interface ModSummary {
   name: string;
   type: string;
   version?: string;
+  /**
+   * Whether Vortex's profile state has this MOD enabled. A mod can ship multiple plugin
+   * files (esp/esm/esl) and enabling the mod does not mean every plugin it ships is
+   * active in the load order — see findMissingDeployedFiles' vortexEnabled for the
+   * per-plugin equivalent, which can legitimately disagree with this field.
+   */
   enabled: boolean;
 }
 
@@ -1564,6 +1570,13 @@ export interface KnownModConflictMatch {
   targetName?: string;
   /** Set when the rule matches by file identity rather than (or in addition to) modId — the real target when targetId is undefined. */
   logicalFileName?: string;
+  /**
+   * Version range this rule guards against, when present — found live: a mod can carry
+   * several "conflicts" rules against its OWN logicalFileName, one per incompatible
+   * version range (e.g. "<2.0.12||>2.0.12" and "<2.0.11||>2.0.11"). Without this field
+   * those rules are indistinguishable in the output even though they're different rules.
+   */
+  versionMatch?: string;
   /** True when the conflicting mod is both installed AND currently enabled — an active conflict. Always false when targetId is undefined (nothing to check). */
   targetEnabled: boolean;
   /** Free-text explanation Vortex/the mod author attached to the rule, when present (e.g. "Incompatible Script Extender"). */
@@ -1592,7 +1605,7 @@ export function listKnownModConflicts(
   type RealModRule = {
     type: string;
     comment?: string;
-    reference: { id?: string; idHint?: string; logicalFileName?: string };
+    reference: { id?: string; idHint?: string; logicalFileName?: string; versionMatch?: string };
   };
   const matches: KnownModConflictMatch[] = [];
   for (const mod of enabledMods) {
@@ -1609,6 +1622,7 @@ export function listKnownModConflicts(
         targetId,
         targetName: targetMod !== undefined ? util.renderModName(targetMod) : undefined,
         logicalFileName: rule.reference.logicalFileName,
+        versionMatch: rule.reference.versionMatch,
         targetEnabled: targetId !== undefined && isEnabled(targetId),
         comment: rule.comment,
       });
@@ -1619,7 +1633,12 @@ export function listKnownModConflicts(
 
 export interface DeploymentDiscrepancy {
   plugin: string;
-  /** Whether Vortex's active-profile load order has this plugin enabled. */
+  /**
+   * Whether Vortex's active-profile load order has this PLUGIN (esp/esm/esl) enabled —
+   * not the same as a mod's overall enabled state (ModSummary.enabled). A mod shipping
+   * several plugin variants can be mod-enabled while most of its individual plugins are
+   * load-order-disabled; that's normal, not itself a discrepancy.
+   */
   vortexEnabled: boolean;
   /** Whether the plugin file actually exists in the game's Data folder. */
   existsInDataFolder: boolean;
