@@ -96,6 +96,7 @@ hand-transcribed, so it can't silently drift from the code.
 | `list_downloads`              | read   | List the download queue/history for a game (defaults to the active game): name, state, progress percent, size, start time — a formatted vie… |
 | `list_notifications`          | read   | List Vortex's current notifications (errors, warnings, info) — what Vortex itself is currently flagging as a problem, useful for diagnosing… |
 | `list_mod_rules`              | read   | List a mod's dependency/conflict rules (before/after/requires/conflicts/...), resolving each reference to the target mod's friendly name wh… |
+| `find_mod_dependents`         | read   | Find every OTHER installed mod whose own rules reference this one — the reverse of list_mod_rules, which only shows rules recorded ON the m… |
 | `find_mod_by_file`            | read   | Find which installed mod(s) contain a file with this name, by scanning mod staging folders on disk (no reflectable API exposes this).        |
 | `list_file_conflicts`         | read   | List files provided by more than one currently-enabled mod (for the active/given profile) — the read side of conflict resolution; found by…  |
 | `find_missing_masters`        | read   | Find enabled plugins whose master files aren't themselves enabled — reads each plugin's real TES4 header from the game's Data folder (the B… |

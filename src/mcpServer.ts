@@ -300,6 +300,28 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "find_mod_dependents",
+    {
+      description:
+        "Find every OTHER installed mod whose own rules reference this one — the reverse " +
+        "of list_mod_rules, which only shows rules recorded ON the mod you ask about. " +
+        "Answers 'what depends on/conflicts with/orders around this mod', e.g. before " +
+        "removing or updating it. A join vortex_query/list_mod_rules can't do in one call " +
+        "without scanning every other installed mod yourself.",
+      inputSchema: z.object({
+        modId: z
+          .string()
+          .min(1, "modId is required (query list_mods to find one)")
+          .describe("Mod id (query list_mods to find one)"),
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+      }),
+    },
+    async ({ modId, gameId }) => ({
+      content: [jsonText(control.findModDependents(api, modId, gameId))],
+    }),
+  );
+
+  server.registerTool(
     "find_mod_by_file",
     {
       description:

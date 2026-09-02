@@ -1033,6 +1033,65 @@ export function listModRules(api: IExtensionApi, modId: string, gameId?: string)
   });
 }
 
+export interface ModDependentSummary {
+  modId: string;
+  modName: string;
+  /** The rule type the dependent mod recorded against this one (before/after/requires/conflicts/recommends/...). */
+  ruleType: string;
+  enabled: boolean;
+  versionMatch?: string;
+}
+
+/**
+ * The reverse of listModRules: finds every OTHER installed mod whose own rules
+ * reference this modId — "what depends on/conflicts with/orders around this mod". A
+ * genuine join reflection can't do in one call: listModRules only returns rules
+ * recorded ON the mod you ask about, so answering "is it safe to update or remove this
+ * mod" otherwise means calling listModRules once per OTHER installed mod (hundreds of
+ * calls on a large modlist — found live, one profile alone had 617 installed mods) and
+ * filtering the results client-side.
+ */
+export function findModDependents(
+  api: IExtensionApi,
+  modId: string,
+  gameId?: string,
+): ModDependentSummary[] {
+  const st = state(api);
+  const targetGameId = resolveGameId(gameId, st);
+  const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
+  if (mods[modId] === undefined) {
+    throw new Error(`Unknown mod: ${modId}`);
+  }
+  const profile = selectors.activeProfile(st);
+  const isEnabled = (id: string): boolean =>
+    profile?.gameId === targetGameId ? (profile?.modState?.[id]?.enabled ?? false) : false;
+
+  type RealModRule = {
+    type: string;
+    reference: { id?: string; idHint?: string; versionMatch?: string };
+  };
+  const dependents: ModDependentSummary[] = [];
+  for (const mod of Object.values(mods)) {
+    if (mod.id === modId) {
+      continue;
+    }
+    const rules = (mod.rules ?? []) as unknown as RealModRule[];
+    for (const rule of rules) {
+      const targetId = rule.reference.id ?? rule.reference.idHint;
+      if (targetId === modId) {
+        dependents.push({
+          modId: mod.id,
+          modName: util.renderModName(mod),
+          ruleType: rule.type,
+          enabled: isEnabled(mod.id),
+          versionMatch: rule.reference.versionMatch,
+        });
+      }
+    }
+  }
+  return dependents;
+}
+
 // Vortex doesn't expose a selector or reflectable API for "which mod owns this file" or
 // "which mods conflict on which files" — the closest event names found via vortex_describe
 // (get-mod-files, update-conflicts-and-rules) are undocumented internal conventions with

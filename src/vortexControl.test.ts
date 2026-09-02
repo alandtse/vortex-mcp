@@ -61,6 +61,7 @@ import {
   findMissingDeployedFiles,
   findMissingMasters,
   findModByFile,
+  findModDependents,
   launchGame,
   listCategories,
   listDialogs,
@@ -1074,6 +1075,75 @@ describe("vortexControl: listModRules", () => {
         comment: "Incompatible Script Extender",
       },
     ]);
+  });
+});
+
+describe("vortexControl: findModDependents", () => {
+  it("finds every OTHER mod whose rules reference the target, ignoring its own rules", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    vi.mocked(selectors.activeProfile).mockReturnValue({
+      gameId: "skyrimse",
+      modState: { modB: { enabled: true }, modC: { enabled: false } },
+    } as never);
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: {
+            modA: {
+              id: "modA",
+              type: "",
+              installationPath: "",
+              // modA's own rules must never appear in modA's own dependents.
+              rules: [{ type: "before", reference: { id: "modA" } }],
+            },
+            modB: {
+              id: "modB",
+              type: "",
+              installationPath: "",
+              rules: [{ type: "after", reference: { id: "modA", versionMatch: "*" } }],
+            },
+            modC: {
+              id: "modC",
+              type: "",
+              installationPath: "",
+              rules: [{ type: "requires", reference: { idHint: "modA" } }],
+            },
+            modD: {
+              id: "modD",
+              type: "",
+              installationPath: "",
+              rules: [{ type: "after", reference: { id: "modB" } }],
+            },
+          },
+        },
+      },
+    });
+
+    expect(findModDependents(api, "modA")).toEqual([
+      { modId: "modB", modName: "modB", ruleType: "after", enabled: true, versionMatch: "*" },
+      { modId: "modC", modName: "modC", ruleType: "requires", enabled: false },
+    ]);
+  });
+
+  it("returns an empty array for a mod nothing depends on", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: { mods: { skyrimse: { modA: { id: "modA", type: "", installationPath: "" } } } },
+    });
+
+    expect(findModDependents(api, "modA")).toEqual([]);
+  });
+
+  it("throws for an unknown mod id", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: { mods: { skyrimse: {} } },
+    });
+
+    expect(() => findModDependents(api, "missing")).toThrow(/Unknown mod/);
   });
 });
 
