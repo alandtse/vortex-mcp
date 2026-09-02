@@ -244,6 +244,38 @@ telling them apart matters for where the fix belongs:
    (optionally preceded by `setExternalChangeAction` calls to override the
    default per-file action first).
 
+### Nexus mod search: checked, doesn't exist, not building it
+
+Keyword search for mods on Nexus was considered and dropped — recorded
+here so it isn't re-investigated. Checked at every layer that could
+plausibly carry it: Vortex's own `api.ext.nexus*` surface has no search
+(only `nexusGetTrendingMods`/`nexusGetLatestMods` and
+`nexusSearchCollections`, which is Collections-only); the official Nexus
+v3 REST API's OpenAPI schema has no search endpoint; Vortex's own in-app
+Nexus browser (`browse_nexus/views/BrowseNexusPage.tsx`) searches
+Collections only, same limitation; and Mod Organizer 2's Nexus
+integration doesn't do API-driven mod search either — its `browserview.h`
+embeds an actual browser widget pointed at the real nexusmods.com website
+for search, the same "embed the website" pattern Vortex's own browser
+page uses. Two independent mod managers converged on the same workaround,
+which is itself evidence there's nothing to wrap: **no mod manager
+checked does API-driven Nexus mod search**, because the capability
+doesn't exist in Nexus's public API at all — not merely unexposed by
+Vortex's wrapper.
+
+That distinction is why case (b) above doesn't apply here: there's no
+upstream capability for Vortex core to expose via `registerAPI`, so
+there's nothing for vortex-mcp to reflect either. Writing a search tool
+today would mean either scraping the website (fragile, outside any
+published API) or calling Nexus's API directly with the raw key — the
+exact `state.confidential` exposure the [Safety](#safety) section above
+closes, reopened from inside vortex-mcp's own code. If Nexus ever ships a
+search endpoint, the fix is the same shape as `confirmExternalChanges`:
+Vortex core adds `api.ext.nexusSearchMods` (or similar) beside the
+existing `nexusSearchCollections`, holding the key internally and
+returning only results, and `vortex_dispatch` picks it up for free with
+zero vortex-mcp changes.
+
 ### Keeping this table in sync
 
 The tools table above is generated, not hand-written — it comes straight
@@ -361,6 +393,31 @@ authenticated caller can do (see the `vortex_dispatch` section above for
 why an earlier, more restrictive version of this was removed). Acceptable
 for a local single-user tool; do not bind this to a non-loopback address,
 and treat the token like any other local secret.
+
+**One exception to "no per-tool restriction": `state.confidential` (the
+Nexus API key or OAuth credential Vortex itself stores) is redacted out of
+every `vortex_query` response, token or no token.** This surfaced live:
+`vortex_query({selector: "apiKey"})` and `vortex_query({path:
+["confidential", ...]})` both returned the real credential in plaintext,
+because reflection swept up `state.confidential` the same as every other
+harmless selector/path. Redaction happens in `mcpServer.ts`'s `jsonText` —
+the one funnel every tool response already serializes through — by
+provenance: anything sourced from the live `state.confidential` subtree
+(matched structurally for objects, by value for a freshly-computed string
+like `apiKey`'s return) becomes `"[redacted: state.confidential]"` before
+it's ever written to the wire. Selectors that legitimately derive a
+non-secret fact from that subtree (`isLoggedIn`) are unaffected — the
+redaction runs on the _output_, after the selector already ran on real
+state, not by handing selectors a doctored copy of `state` up front (that
+was considered and rejected: it corrupts any selector that reads
+`confidential` for a non-secret purpose, returning a wrong answer instead
+of a visible redaction). This is a token-independent invariant, not a
+tier: a human at Vortex's own UI can't read their stored credential back
+out as plaintext either, so redacting it is the UI-parity floor, not a
+restriction the token lifts. `vortex_dispatch` can still _write_ new
+credentials (`setUserAPIKey`, `nexusRequestNexusLogin`, …) — same as a
+human re-entering their key in Vortex's settings page — the boundary is
+specifically on reading one back out.
 
 ## License
 

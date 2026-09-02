@@ -1,6 +1,6 @@
 import http from "node:http";
 
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("@nexusmods/vortex-api", () => ({
   log: vi.fn(),
@@ -47,9 +47,16 @@ vi.mock("./vortexControl", () => ({
   backupState: vi.fn(async () => "C:\\fake\\backup.json"),
 }));
 
+import * as control from "./vortexControl";
+
 let startMcpServer: typeof import("./mcpServer").startMcpServer;
 let port: number;
 let server: http.Server;
+
+// Mutable so redaction tests can put a fake credential in place and confirm it never
+// reaches a response — real shape is settings.confidential.account.nexus.{APIKey,
+// OAuthCredentials}, but only the value/structure matters to the redaction logic.
+const fakeState: { confidential: Record<string, unknown> } = { confidential: {} };
 
 function request(
   options: Partial<http.RequestOptions> & { body?: unknown } = {},
@@ -103,7 +110,7 @@ describe("mcpServer HTTP gating", () => {
     process.env.VORTEX_MCP_PORT = "38173";
     port = 38173;
     ({ startMcpServer } = await import("./mcpServer"));
-    server = startMcpServer({} as never);
+    server = startMcpServer({ getState: () => fakeState } as never);
     await new Promise<void>((resolve) => server.once("listening", resolve));
   });
 
@@ -216,5 +223,71 @@ describe("mcpServer HTTP gating", () => {
     });
     expect(res.status).toBe(200);
     expect(res.body).toContain("Provide either");
+  });
+
+  // Redacted at the jsonText funnel in mcpServer.ts, by provenance from state.confidential
+  // — not by name-gating the `apiKey` selector or blocking a `confidential`-prefixed path
+  // (see vortexControl's own selector/path reflection, which stays name-agnostic).
+  describe("confidential redaction", () => {
+    afterEach(() => {
+      fakeState.confidential = {};
+    });
+
+    it("redacts a freshly-computed string a selector returns (selector mode)", async () => {
+      const fakeApiKey = "abcdefghijklmnopqrstuvwxyz123456";
+      fakeState.confidential = { account: { nexus: { APIKey: fakeApiKey } } };
+      vi.mocked(control.querySelector).mockReturnValueOnce(fakeApiKey);
+
+      const res = await request({
+        headers: jsonHeaders,
+        body: {
+          jsonrpc: "2.0",
+          id: 5,
+          method: "tools/call",
+          params: { name: "vortex_query", arguments: { selector: "apiKey" } },
+        },
+      });
+      expect(res.status).toBe(200);
+      expect(res.body).not.toContain(fakeApiKey);
+      expect(res.body).toContain("[redacted: state.confidential]");
+    });
+
+    it("redacts the confidential subtree structurally in path mode, e.g. path: []", async () => {
+      const fakeToken = "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzz";
+      fakeState.confidential = { account: { nexus: { OAuthCredentials: { token: fakeToken } } } };
+      vi.mocked(control.queryStatePath).mockReturnValueOnce(fakeState);
+
+      const res = await request({
+        headers: jsonHeaders,
+        body: {
+          jsonrpc: "2.0",
+          id: 6,
+          method: "tools/call",
+          params: { name: "vortex_query", arguments: { path: [] } },
+        },
+      });
+      expect(res.status).toBe(200);
+      expect(res.body).not.toContain(fakeToken);
+      expect(res.body).toContain("[redacted: state.confidential]");
+    });
+
+    it("does not redact ordinary values that happen to be long strings", async () => {
+      fakeState.confidential = { account: { nexus: { APIKey: "short-and-irrelevant" } } };
+      const longButUnrelated = "this is a perfectly normal long mod description string";
+      vi.mocked(control.querySelector).mockReturnValueOnce(longButUnrelated);
+
+      const res = await request({
+        headers: jsonHeaders,
+        body: {
+          jsonrpc: "2.0",
+          id: 7,
+          method: "tools/call",
+          params: { name: "vortex_query", arguments: { selector: "profiles" } },
+        },
+      });
+      expect(res.status).toBe(200);
+      expect(res.body).toContain(longButUnrelated);
+      expect(res.body).not.toContain("[redacted");
+    });
   });
 });

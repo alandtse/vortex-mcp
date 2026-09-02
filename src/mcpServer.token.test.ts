@@ -100,7 +100,7 @@ describe("mcpServer bearer token gating", () => {
     process.env.VORTEX_MCP_TOKEN = "test-secret";
     port = 38174;
     const { startMcpServer } = await import("./mcpServer");
-    server = startMcpServer({} as never);
+    server = startMcpServer({ getState: () => ({ confidential: {} }) } as never);
     await new Promise<void>((resolve) => server.once("listening", resolve));
   });
 

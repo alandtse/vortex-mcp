@@ -22,16 +22,84 @@ const HOST = "127.0.0.1";
 // hostname resolves to 127.0.0.1); the token is a second, independent gate for writes.
 const TOKEN = process.env.VORTEX_MCP_TOKEN;
 
+// Vortex's `confidential` state hive (Nexus API key, OAuth credentials, and anything
+// else Vortex core itself treats as a credential — see Application.ts's registerHive
+// and store.ts's own exclusion of it from backups) is the one part of the reflected
+// state tree that's actually sensitive. Every other selector/path vortex_query can
+// reach is harmless mod/profile/game state, so this is a targeted invariant, not a
+// return to the curated allowlist this project deliberately removed for writes: it
+// names no selectors and no paths, just the one structural hive Vortex core already
+// marks as confidential.
+const CONFIDENTIAL_REDACTED = "[redacted: state.confidential]";
+// A floor on redacted string values, not just object nodes: apiKey-style selectors
+// return a freshly computed string with no path a structural check could see, so the
+// string itself has to be matched by value too. The floor keeps a short, benign
+// string (a username, a locale code) from colliding by coincidence.
+const MIN_REDACTED_STRING_LENGTH = 16;
+
+function collectConfidentialProvenance(confidential: unknown): {
+  nodes: WeakSet<object>;
+  values: Set<string>;
+} {
+  const nodes = new WeakSet<object>();
+  const values = new Set<string>();
+  const visit = (node: unknown): void => {
+    if (typeof node === "string") {
+      if (node.length >= MIN_REDACTED_STRING_LENGTH) {
+        values.add(node);
+      }
+      return;
+    }
+    if (node === null || typeof node !== "object") {
+      return;
+    }
+    nodes.add(node);
+    for (const child of Object.values(node)) {
+      visit(child);
+    }
+  };
+  visit(confidential);
+  return { nodes, values };
+}
+
 // JSON.stringify(undefined) returns the actual `undefined` value, not a string —
 // a legitimate result (an unresolved vortex_query path/selector, found live: an
 // MCP response's content[].text must be a string, so an ungated JSON.stringify
 // crashed the whole call at the SDK's own response-schema validation instead of
 // returning a clean "null"). `?? null` guarantees a real JSON string every time.
-function jsonText(value: unknown): { type: "text"; text: string } {
-  return { type: "text", text: JSON.stringify(value ?? null, null, 2) };
+//
+// Redaction happens here — the one funnel every tool response already passes
+// through via JSON.stringify's own tree walk — rather than by gating individual
+// selectors/paths before they run. Redacting the input state instead (e.g. handing
+// selectors a state whose `confidential` node is replaced first) was considered and
+// rejected: it corrupts legitimate selectors that derive a non-secret fact from that
+// subtree (an isLoggedIn-shaped check), returning a wrong answer instead of a visible
+// redaction. This applies to every read regardless of whether VORTEX_MCP_TOKEN is
+// set — a human at Vortex's own UI can't read their stored credential back out as
+// plaintext either, so redaction is the UI-parity floor, not a tier a token lifts.
+function makeJsonText(api: IExtensionApi): (value: unknown) => { type: "text"; text: string } {
+  return (value: unknown) => {
+    const { confidential } = api.getState();
+    const { nodes, values } = collectConfidentialProvenance(confidential);
+    const text = JSON.stringify(
+      value ?? null,
+      (_key, val: unknown) => {
+        if (typeof val === "object" && val !== null && nodes.has(val)) {
+          return CONFIDENTIAL_REDACTED;
+        }
+        if (typeof val === "string" && values.has(val)) {
+          return CONFIDENTIAL_REDACTED;
+        }
+        return val;
+      },
+      2,
+    );
+    return { type: "text", text };
+  };
 }
 
 function registerReadTools(server: McpServer, api: IExtensionApi): void {
+  const jsonText = makeJsonText(api);
   server.registerTool(
     "vortex_describe",
     {
@@ -66,7 +134,11 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
         "cross-reference the id yourself); `path` walks the Redux state tree by key " +
         "(e.g. path=['persistent','mods','skyrimse']). Use vortex_describe first to see what's " +
         "available. Genuinely read-only (can't mutate anything) — for calling an api.ext " +
-        "function (which can have side effects), use vortex_dispatch instead.",
+        "function (which can have side effects), use vortex_dispatch instead. Anything sourced " +
+        "from state.confidential (the stored Nexus API key/OAuth credential) comes back as " +
+        '"[redacted: state.confidential]" — this is unconditional, not something the write ' +
+        "token lifts; a selector that only derives a non-secret fact from that subtree (e.g. " +
+        "isLoggedIn) is unaffected.",
       inputSchema: z.object({
         selector: z.string().optional(),
         args: z.array(z.unknown()).optional(),
@@ -392,6 +464,7 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
 }
 
 function registerWriteTools(server: McpServer, api: IExtensionApi): void {
+  const jsonText = makeJsonText(api);
   server.registerTool(
     "switch_profile",
     {
