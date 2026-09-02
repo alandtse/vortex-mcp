@@ -961,10 +961,20 @@ export function listDialogs(api: IExtensionApi): DialogSummary[] {
 
 export interface ModRuleSummary {
   type: string;
-  targetId: string;
+  /**
+   * Undefined when the rule doesn't reference a specific mod by id at all — found live:
+   * a "conflicts" rule commonly guards against a different *version* of the same logical
+   * file rather than naming another mod (see logicalFileName), so there's genuinely
+   * nothing to resolve here, not a lookup failure.
+   */
+  targetId?: string;
   /** Friendly name of the referenced mod, when it's installed and resolvable. */
   targetName?: string;
+  /** Set when the rule matches by file identity rather than (or in addition to) modId — the real target when targetId is undefined. */
+  logicalFileName?: string;
   versionMatch?: string;
+  /** Free-text explanation Vortex/the mod author attached to the rule, when present (e.g. "Incompatible Script Extender"). */
+  comment?: string;
 }
 
 /**
@@ -981,22 +991,30 @@ export function listModRules(api: IExtensionApi, modId: string, gameId?: string)
   if (mod === undefined) {
     throw new Error(`Unknown mod: ${modId}`);
   }
-  // IModRule extends an IRule base that isn't fully resolved in the published
-  // .d.ts (`type` on the rule, `versionMatch` on the reference are both real at
-  // runtime — confirmed against live state — but absent from the exported type).
+  // IModRule extends an IRule base that isn't fully resolved in the published .d.ts
+  // (`type`/`comment` on the rule, `versionMatch`/`logicalFileName` on the reference are
+  // all real at runtime — confirmed against live state — but absent from the exported
+  // type). A "conflicts" rule commonly has neither `id` nor `idHint` at all: found live
+  // on Skyrim Script Extender VR, it guards against a *different version of the same
+  // logical file* (reference: {logicalFileName, versionMatch}), not another mod — there
+  // is genuinely no modId to resolve there, `comment` ("Incompatible Script Extender")
+  // is the real explanation.
   type RealModRule = {
     type: string;
-    reference: { id?: string; idHint?: string; versionMatch?: string };
+    comment?: string;
+    reference: { id?: string; idHint?: string; versionMatch?: string; logicalFileName?: string };
   };
   return (mod.rules ?? []).map((ruleTyped) => {
     const rule = ruleTyped as unknown as RealModRule;
-    const targetId = rule.reference.id ?? rule.reference.idHint ?? "(unresolved reference)";
-    const targetMod = mods[targetId];
+    const targetId = rule.reference.id ?? rule.reference.idHint;
+    const targetMod = targetId !== undefined ? mods[targetId] : undefined;
     return {
       type: rule.type,
       targetId,
       targetName: targetMod !== undefined ? util.renderModName(targetMod) : undefined,
+      logicalFileName: rule.reference.logicalFileName,
       versionMatch: rule.reference.versionMatch,
+      comment: rule.comment,
     };
   });
 }
@@ -1463,11 +1481,20 @@ export async function listDuplicateMods(
 export interface KnownModConflictMatch {
   modId: string;
   modName: string;
-  targetId: string;
+  /**
+   * Undefined when the rule doesn't name another mod at all — found live: a "conflicts"
+   * rule commonly guards against a different *version* of the same logical file (see
+   * logicalFileName), not a separate mod, and there's genuinely no id to resolve then.
+   */
+  targetId?: string;
   /** Name of the conflicting mod, only set when that mod is also currently installed. */
   targetName?: string;
-  /** True when the conflicting mod is both installed AND currently enabled — an active conflict. */
+  /** Set when the rule matches by file identity rather than (or in addition to) modId — the real target when targetId is undefined. */
+  logicalFileName?: string;
+  /** True when the conflicting mod is both installed AND currently enabled — an active conflict. Always false when targetId is undefined (nothing to check). */
   targetEnabled: boolean;
+  /** Free-text explanation Vortex/the mod author attached to the rule, when present (e.g. "Incompatible Script Extender"). */
+  comment?: string;
 }
 
 /**
@@ -1489,7 +1516,11 @@ export function listKnownModConflicts(
     profile?.gameId === targetGameId ? (profile?.modState?.[modId]?.enabled ?? false) : false;
   const enabledMods = Object.values(mods).filter((mod) => isEnabled(mod.id));
 
-  type RealModRule = { type: string; reference: { id?: string; idHint?: string } };
+  type RealModRule = {
+    type: string;
+    comment?: string;
+    reference: { id?: string; idHint?: string; logicalFileName?: string };
+  };
   const matches: KnownModConflictMatch[] = [];
   for (const mod of enabledMods) {
     const rules = (mod.rules ?? []) as unknown as RealModRule[];
@@ -1497,14 +1528,16 @@ export function listKnownModConflicts(
       if (rule.type !== "conflicts") {
         continue;
       }
-      const targetId = rule.reference.id ?? rule.reference.idHint ?? "(unresolved reference)";
-      const targetMod = mods[targetId];
+      const targetId = rule.reference.id ?? rule.reference.idHint;
+      const targetMod = targetId !== undefined ? mods[targetId] : undefined;
       matches.push({
         modId: mod.id,
         modName: util.renderModName(mod),
         targetId,
         targetName: targetMod !== undefined ? util.renderModName(targetMod) : undefined,
-        targetEnabled: isEnabled(targetId),
+        logicalFileName: rule.reference.logicalFileName,
+        targetEnabled: targetId !== undefined && isEnabled(targetId),
+        comment: rule.comment,
       });
     }
   }

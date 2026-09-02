@@ -1034,6 +1034,45 @@ describe("vortexControl: listModRules", () => {
 
     expect(() => listModRules(api, "missing")).toThrow(/Unknown mod/);
   });
+
+  it("surfaces logicalFileName/comment instead of a fake targetId for a rule with no id/idHint (seen live: a same-file-version-guard 'conflicts' rule)", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: {
+            modA: {
+              id: "modA",
+              type: "",
+              installationPath: "",
+              rules: [
+                {
+                  type: "conflicts",
+                  comment: "Incompatible Script Extender",
+                  reference: {
+                    logicalFileName: "Skyrim Script Extender VR (SKSEVR)",
+                    versionMatch: "<2.0.12 || >2.0.12",
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    expect(listModRules(api, "modA")).toEqual([
+      {
+        type: "conflicts",
+        targetId: undefined,
+        targetName: undefined,
+        logicalFileName: "Skyrim Script Extender VR (SKSEVR)",
+        versionMatch: "<2.0.12 || >2.0.12",
+        comment: "Incompatible Script Extender",
+      },
+    ]);
+  });
 });
 
 describe("vortexControl: findModByFile / listFileConflicts", () => {
@@ -1534,6 +1573,47 @@ describe("vortexControl: listKnownModConflicts", () => {
     });
 
     expect(listKnownModConflicts(api)).toEqual([]);
+  });
+
+  it("surfaces logicalFileName/comment for a same-file-version-guard rule with no target modId", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    vi.mocked(selectors.activeProfile).mockReturnValue({
+      gameId: "skyrimse",
+      modState: { modA: { enabled: true } },
+    } as never);
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: {
+            modA: {
+              id: "modA",
+              type: "",
+              installationPath: "",
+              rules: [
+                {
+                  type: "conflicts",
+                  comment: "Incompatible Script Extender",
+                  reference: { logicalFileName: "Skyrim Script Extender VR (SKSEVR)" },
+                },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    expect(listKnownModConflicts(api)).toEqual([
+      {
+        modId: "modA",
+        modName: "modA",
+        targetId: undefined,
+        targetName: undefined,
+        logicalFileName: "Skyrim Script Extender VR (SKSEVR)",
+        targetEnabled: false,
+        comment: "Incompatible Script Extender",
+      },
+    ]);
   });
 });
 
