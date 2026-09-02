@@ -542,9 +542,17 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
   server.registerTool(
     "switch_profile",
     {
-      description: "Switch Vortex to a different profile by id.",
+      description:
+        "Switch Vortex to a different profile by id (query list_profiles to find one). NOT " +
+        "instant or lightweight: read from Vortex's own profile_management source, this " +
+        "purges the current profile's deployed files then deploys the new profile's mods — " +
+        "real, potentially slow filesystem work, the same as switching profiles in the " +
+        "Vortex UI. This tool call returns as soon as the switch is DISPATCHED, not once " +
+        "deployment finishes — poll needToDeployForGame or watch for a 'deploying' " +
+        "notification (list_notifications) if you need to know when it's actually done. " +
+        "Switching to an unknown profileId throws.",
       inputSchema: z.object({
-        profileId: z.string().describe("Target profile id (query selector='profiles' to list)"),
+        profileId: z.string().describe("Target profile id (query list_profiles to find one)"),
       }),
     },
     async ({ profileId }) => {
@@ -560,11 +568,14 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
         "Clone an existing profile into a new one (copies its on-disk profile directory " +
         "— load order, ini tweaks — plus its mod enabled-state), the same operation as " +
         "Vortex's own 'Clone' button. Only ever reads the source profile; never modifies it " +
-        "or switches the active profile.",
+        "or switches the active profile. The clone is always for the SAME game as the " +
+        "source — there's no gameId param and no cross-game cloning. Returns the new " +
+        "profile in the same summary shape list_profiles entries have (id, name, gameId, " +
+        "active, modCount, enabledModCount, lastActivated).",
       inputSchema: z.object({
         sourceProfileId: z
           .string()
-          .describe("Profile id to clone (query selector='profiles' to list)"),
+          .describe("Profile id to clone (query list_profiles to find one)"),
         name: z
           .string()
           .optional()
@@ -639,7 +650,15 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
         "repeated polling with the same `since` returns the same entries; the listener's own " +
         "ring buffer (capped at 500 firings, oldest dropped) is what bounds memory, not " +
         "draining on read. Pass back the returned `lastSeq` as the next call's `since` to get " +
-        "only what's arrived since. Listeners don't survive a Vortex restart.",
+        "only what's arrived since. Returns immediately even with zero new entries — this is " +
+        "a poll, not a blocking wait; call it again later rather than expecting it to hang " +
+        "until something happens. Listeners don't survive a Vortex restart. Worked example " +
+        "(confirmed live) to watch new/dismissed notifications: vortex_dispatch " +
+        'action="onStateChange" args=[["session","notifications"], "__CALLBACK__"], then poll ' +
+        "the returned listenerId — a wrong state path (e.g. persistent.notifications, which " +
+        "doesn't exist) fails SILENTLY, returning an empty entries array forever rather than " +
+        "an error, indistinguishable from 'registered correctly but nothing happened yet' — " +
+        "verify your path first with vortex_query path=[...].",
       inputSchema: z.object({
         listenerId: z
           .string()

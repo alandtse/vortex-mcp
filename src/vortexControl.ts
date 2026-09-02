@@ -794,6 +794,13 @@ export function listCategories(api: IExtensionApi, gameId?: string): CategorySum
 export interface LoadOrderEntry {
   plugin: string;
   index: number;
+  /**
+   * Whether this specific PLUGIN is active in the load order — a separate concept from a
+   * MOD's enabled state (see ModSummary.enabled). A mod can be enabled while one of the
+   * plugins it ships is toggled off here (see DeploymentDiscrepancy.vortexEnabled, the
+   * same underlying flag): toggling a mod on/off does not necessarily toggle every plugin
+   * it ships, and set_mods_enabled operates on mods, not individual plugins.
+   */
   enabled: boolean;
 }
 
