@@ -12,7 +12,10 @@ if (!existsSync(dist)) {
 }
 
 const info = JSON.parse(readFileSync(path.join(root, "info.json"), "utf8"));
-const pluginId = info.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+// Matches installExtension.ts's own precedence (extensionInfo?.id ?? archive basename) —
+// info.json's `id` is what decides the stable plugins/ folder name across real installs,
+// so this has to agree with it rather than always deriving from `name`.
+const pluginId = info.id ?? info.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 const target = path.join(process.env.APPDATA, "vortex", "plugins", pluginId);
 
 mkdirSync(target, { recursive: true });
