@@ -117,6 +117,7 @@ describe("vortexControl: reflection", () => {
     expect(result.dispatchHints).not.toHaveProperty("setNextProfile");
     expect(result.extensionApis).toEqual([]);
     expect(result.extensionApiHints.nexusGetModInfo).toContain("gameId: string");
+    expect(result.extensionApiHints.nexusSearchCollections).toContain("OPTIONS OBJECT");
     expect(result.eventHints["deploy-mods"]).toContain("__CALLBACK__");
     expect(result.listenerHints.onStateChange).toContain("__CALLBACK__");
     expect(result.selectorHints.knownGames).toContain("discovered");

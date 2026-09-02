@@ -555,8 +555,18 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
     {
       description:
         "Dispatch a named Vortex action creator, api.ext function, event, or direct api " +
-        "method — tried in that order. (1) Redux action creator (e.g. action='setModEnabled'). " +
-        "(2) api.ext function (e.g. action='nexusGetModInfo'). (3) a currently-registered " +
+        "method — tried in that order. (1) Redux action creator (e.g. action='setModEnabled') " +
+        "— NOT runtime-validated: found live that a wrong argument type (a string where a " +
+        "boolean was expected) or a missing required argument both dispatch successfully with " +
+        "no error, silently carrying the bad payload into the reducer/UI rather than " +
+        "rejecting it here — double-check argument order/types yourself, especially for " +
+        "anything missing from dispatchHints. (2) api.ext function (e.g. " +
+        "action='nexusGetModInfo') — unlike action creators, these DO throw on a wrong " +
+        "argument shape, but as a raw, unhelpful runtime error (e.g. a bare " +
+        '"x.trim is not a function" with no indication which argument or what shape was ' +
+        "expected) rather than a validation message — see extensionApiHints for the " +
+        "verified subset, and expect to iterate by trial and error on anything else. " +
+        "(3) a currently-registered " +
         "event name, emitted via api.events.emit — most fire-and-forget by default; pass " +
         '"__CALLBACK__" as one of the args at the position Vortex\'s own handler expects a ' +
         "Node-style (err, result?) => void callback and vortex_dispatch will await real " +

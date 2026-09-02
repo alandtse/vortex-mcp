@@ -1671,6 +1671,22 @@ const EXTENSION_API_HINTS = new Map<string, string>([
       "vortex_query path=persistent.mods.<gameId>.<modId>.attributes.modId if you only " +
       "have the Vortex mod id.",
   ],
+  [
+    "nexusGetCollections",
+    'gameId: string (plain positional string, e.g. args=["skyrimvr"]) — returns the ' +
+      "installed/downloaded collections for that game, or null if there are none (found " +
+      "live: null on a game with none, not an error).",
+  ],
+  [
+    "nexusSearchCollections",
+    'A single OPTIONS OBJECT, not positional args — e.g. args=[{"gameId": "skyrimvr", ' +
+      '"query": "vanilla"}] (confirmed working live, returned {nodes, totalCount}). ' +
+      "Passing a bare string instead throws a raw, unhelpful runtime error " +
+      '("search.trim is not a function") with no indication the shape is wrong — this ' +
+      "project doesn't have the exact ICollectionSearchOptions field list (it's declared " +
+      "in @nexusmods/nexus-api, not vendored here), so treat this as a starting point, " +
+      "not the full option set.",
+  ],
 ]);
 
 function getExtensionApi<T>(api: IExtensionApi, name: string): T {
