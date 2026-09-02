@@ -1,0 +1,132 @@
+# Release pipeline (mirrors the sibling FloatingDamageNG/devbench repos): semantic-release
+# reads the Conventional Commit history, picks the next version, bumps `version` in
+# package.json and info.json, commits it back (with [skip ci]), tags vX.Y.Z, and publishes
+# a draft GitHub Release whose body is the curated changelog. The package job then builds
+# at that exact tag, zips dist/ + info.json into the Vortex plugin layout, attaches it, and
+# promotes the release. Nexus upload is a separate, explicitly-gated job.
+#
+# Runs on every push to main (and on manual dispatch): if there are unreleased Conventional
+# commits, semantic-release cuts the next version; otherwise it no-ops and the downstream
+# jobs skip. The bump commit carries [skip ci] so it doesn't re-trigger.
+#
+# Nexus upload is gated on repo variable NEXUS_AUTO_UPLOAD=true (plus secrets UNEX_APIKEY /
+# UNEX_NEXUSMODS_SESSION_COOKIE and a real nexus_mod_id in nexus-upload.yml — the Nexus mod
+# page itself has to exist first; nothing here can create one, see nexus-upload.yml); when
+# unset it dry-runs (reports only).
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  semantic-release:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the bump commit + tag, create the GitHub Release
+    outputs:
+      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
+      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
+      new_release_git_tag: ${{ steps.semantic.outputs.new_release_git_tag }}
+      new_release_notes: ${{ steps.semantic.outputs.new_release_notes }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+
+      - name: Semantic Release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v6
+        with:
+          extra_plugins: |
+            @semantic-release/npm
+            @semantic-release/git
+            @google/semantic-release-replace-plugin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  package:
+    name: Build & package
+    needs: semantic-release
+    if: needs.semantic-release.outputs.new_release_published == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: write # attach the zip asset and promote the draft release
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.semantic-release.outputs.new_release_git_tag }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run ci
+
+      - name: Assemble plugin zip
+        id: pkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.semantic-release.outputs.new_release_git_tag }}"
+          stage="vortex-mcp-${tag}"
+          # Layout matches scripts/install-local.mjs: dist/* + info.json at the
+          # plugin folder's top level, so unzipping straight into
+          # %APPDATA%/vortex/plugins/vortex-mcp works with no rearranging.
+          mkdir -p "$stage"
+          cp -r dist/. "$stage/"
+          cp info.json "$stage/"
+          (cd "$stage" && 7z a -tzip -mx=9 "../${stage}.zip" .)
+          echo "archive=${stage}.zip" >> "$GITHUB_OUTPUT"
+          7z l "${stage}.zip"
+
+      # semantic-release created the GitHub Release as a draft (changelog body).
+      # Attach the zip, then promote to published — only now that the asset
+      # exists, so a failed build/package leaves a hidden draft instead of a
+      # download-less tag.
+      - name: Attach archive and publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.semantic-release.outputs.new_release_git_tag }}
+          ARCHIVE: ${{ steps.pkg.outputs.archive }}
+        run: |
+          gh release upload "$TAG" "$ARCHIVE" --clobber
+          gh release edit "$TAG" --draft=false
+
+  # Upload to Nexus, reusing semantic-release's curated notes as the changelog. Default is
+  # a dry-run (report only). Set repo variable NEXUS_AUTO_UPLOAD=true (plus the UNEX_*
+  # secrets and a real nexus_mod_id in nexus-upload.yml, once the mod page exists) to
+  # upload for real on push-driven releases.
+  nexus:
+    name: Nexus upload
+    needs: [semantic-release, package]
+    if: needs.semantic-release.outputs.new_release_published == 'true'
+    uses: ./.github/workflows/nexus-upload.yml
+    with:
+      tag: ${{ needs.semantic-release.outputs.new_release_git_tag }}
+      dry_run: ${{ vars.NEXUS_AUTO_UPLOAD == 'true' && 'false' || 'true' }}
+      changelog: ${{ needs.semantic-release.outputs.new_release_notes }}
+    secrets:
+      UNEX_NEXUSMODS_SESSION_COOKIE: ${{ secrets.UNEX_NEXUSMODS_SESSION_COOKIE }}
+      UNEX_APIKEY: ${{ secrets.UNEX_APIKEY }}

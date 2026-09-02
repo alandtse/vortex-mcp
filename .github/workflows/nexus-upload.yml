@@ -1,0 +1,169 @@
+# Nexus upload for vortex-mcp. Thin wrapper around the shared reusable workflow
+# alandtse/nexus-workflows/.github/workflows/upload-nexus-official.yml — the official
+# Nexus-Mods/upload-action (Nexus v3 API) path, rather than the BUTR.NexusUploader/unex
+# wrapper the sibling FloatingDamageNG/devbench repos still use. It handles its own
+# dry-run reporting and idempotent re-run check internally, so this wrapper only resolves
+# the release tag/changelog and passes them through.
+#
+# file_group_id has no default and dry-run stays the only mode until it's set. That's not
+# a missing config value, it's two real, sequenced limitations: (1) creating a new Nexus
+# mod page isn't exposed by any API — checked directly against Nexus's own v3 OpenAPI
+# schema and confirmed by BUTR.NexusUploader's own docs — so the page has to be created by
+# hand once on nexusmods.com; (2) even after that, this specific uploader needs an existing
+# file GROUP id, minted by uploading the mod's first file once on the website (Files tab ->
+# "API Info", or the Manage Files edit menu) — it doesn't create the first file either.
+# Once both exist, set file_group_id below (or pass it on manual dispatch) and the
+# NEXUS_AUTO_UPLOAD=true repo variable (plus UNEX_APIKEY) to let release.yml upload every
+# subsequent version automatically.
+name: "Nexus: Upload Release"
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published stable release tag to upload (vX.Y.Z)."
+        required: true
+      nexus_game_id:
+        description: "Nexus game/section ID ('site' for Vortex extensions/utilities)."
+        required: false
+        default: "site"
+      nexus_mod_id:
+        description: "vortex-mcp Nexus mod ID (only used for the idempotent-reupload check; empty skips that check)."
+        required: false
+        default: ""
+      file_group_id:
+        description: "Nexus file group ID to upload into (empty until minted by hand; required for a real upload)."
+        required: false
+        default: ""
+      mod_filename:
+        description: "Display name for the uploaded file."
+        required: false
+        default: "Vortex MCP"
+      dry_run:
+        description: "If true, only report the planned upload; never upload."
+        required: false
+        type: choice
+        default: "true"
+        options: ["true", "false"]
+      changelog:
+        description: "Optional changelog; defaults to the GitHub release body."
+        required: false
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      nexus_game_id:
+        required: false
+        type: string
+        default: "site"
+      nexus_mod_id:
+        required: false
+        type: string
+        default: ""
+      file_group_id:
+        required: false
+        type: string
+        default: ""
+      mod_filename:
+        required: false
+        type: string
+        default: "Vortex MCP"
+      dry_run:
+        required: false
+        type: string
+        default: "true"
+      changelog:
+        required: false
+        type: string
+        default: ""
+    secrets:
+      UNEX_APIKEY:
+        required: false
+
+# Read-only on GitHub: jobs list/download the release and write only to Nexus.
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Resolve release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      dry_run: ${{ steps.resolve.outputs.dry_run }}
+      changelog: ${{ steps.body.outputs.changelog }}
+    steps:
+      - name: Resolve and validate tag
+        id: resolve
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_GROUP_ID: ${{ inputs.file_group_id }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="$INPUT_TAG"
+          [ -n "$TAG" ] || { echo "::error::No tag provided." >&2; exit 1; }
+          # Nexus only gets stable releases.
+          if [[ "$TAG" == *-* ]]; then
+            echo "::error::'$TAG' is a pre-release tag; only stable releases go to Nexus." >&2
+            exit 1
+          fi
+          DRAFT=$(gh api "repos/$GITHUB_REPOSITORY/releases" \
+            --jq ".[] | select(.tag_name == \"$TAG\") | .draft" 2>/dev/null | head -1)
+          if [ "$DRAFT" != "false" ]; then
+            echo "::error::Release '$TAG' is not published. Publish the GitHub release first." >&2
+            exit 1
+          fi
+          DRY_RUN=$([ "$INPUT_DRY_RUN" = "false" ] && echo false || echo true)
+          if [ -z "$INPUT_GROUP_ID" ] && [ "$DRY_RUN" = "false" ]; then
+            echo "::error::file_group_id is required for a real upload — mint it by uploading the first file by hand on nexusmods.com, then set it here." >&2
+            exit 1
+          fi
+          [ -n "$INPUT_GROUP_ID" ] || echo "::warning::file_group_id is empty — dry-run only."
+          {
+            echo "tag=$TAG"
+            echo "version=${TAG#v}"
+            echo "dry_run=$DRY_RUN"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Resolve changelog (release body)
+        id: body
+        env:
+          INPUT_CHANGELOG: ${{ inputs.changelog }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          DELIM="EOF_$(openssl rand -hex 8)"
+          {
+            echo "changelog<<$DELIM"
+            if [ -n "$INPUT_CHANGELOG" ]; then
+              printf '%s\n' "$INPUT_CHANGELOG"
+            else
+              gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq '.body // ""' 2>/dev/null || true
+            fi
+            echo "$DELIM"
+          } >> "$GITHUB_OUTPUT"
+
+  upload:
+    name: Upload to Nexus
+    needs: prepare
+    uses: alandtse/nexus-workflows/.github/workflows/upload-nexus-official.yml@main
+    with:
+      file_group_id: ${{ inputs.file_group_id }}
+      version: ${{ needs.prepare.outputs.version }}
+      tag_name: ${{ needs.prepare.outputs.tag }}
+      file_category: main
+      display_name: ${{ inputs.mod_filename || 'Vortex MCP' }}
+      description: "Vortex extension exposing an MCP server for programmatic control of Vortex. See changelog."
+      update_mod_version: true
+      primary_mod_manager_download: true
+      dry_run: ${{ needs.prepare.outputs.dry_run == 'true' }}
+      check_existing: true
+      nexus_mod_id: ${{ inputs.nexus_mod_id }}
+      nexus_game_id: ${{ inputs.nexus_game_id || 'site' }}
+    secrets:
+      UNEX_APIKEY: ${{ secrets.UNEX_APIKEY }}

@@ -48,8 +48,12 @@ pnpm run install-plugin   # copy dist/ + info.json into %APPDATA%\vortex\plugins
 ```
 
 Restart Vortex. The MCP server listens on `http://127.0.0.1:3701/mcp`
-(override with `VORTEX_MCP_PORT`). There's no packaged zip/release yet —
-`install-plugin` is a straight directory copy for local development.
+(override with `VORTEX_MCP_PORT`). `install-plugin` is a straight directory
+copy for local development; `.github/workflows/release.yml` builds a
+versioned zip in the same layout (dist/ + info.json) and attaches it to a
+GitHub Release on every Conventional-Commit-worthy push to `main` (see
+[Release process](#release-process)). No Nexus mod page exists yet — see
+that section.
 
 ## Connect an MCP client
 
@@ -288,6 +292,40 @@ undefined`), matching the 2026-07-28 spec's removal of sessions — there is
   "Restart now" button: graceful window close, then Vortex's normal shutdown
   sequence, then relaunch. Unlike vortex-api this isn't a published contract
   — it can change across Vortex releases without notice.
+
+## Release process
+
+`.github/workflows/release.yml` follows the same pattern as the sibling
+FloatingDamageNG/devbench repos: `semantic-release` reads Conventional
+Commit history on every push to `main`, and — if there's anything
+releasable — picks the next version, bumps it in `package.json`/`info.json`,
+commits that back (`[skip ci]`), tags `vX.Y.Z`, and opens a draft GitHub
+Release with the generated changelog as its body. A second job then checks
+out that exact tag, runs the full `pnpm run ci` pipeline, zips `dist/` +
+`info.json` into the same layout `install-plugin` uses (so unzipping it
+straight into `%APPDATA%/vortex/plugins/vortex-mcp` works with no
+rearranging), attaches it to the release, and promotes the release out of
+draft — only after the asset exists, so a failed build leaves a hidden
+draft instead of a download-less tag.
+
+**Nexus upload has no mod page to upload to yet.** `.github/workflows/
+nexus-upload.yml` wraps `alandtse/nexus-workflows`'s
+`upload-nexus-official.yml` — the official `Nexus-Mods/upload-action`
+(Nexus v3 API) path, rather than the `BUTR.NexusUploader`/`unex` wrapper
+the sibling FloatingDamageNG/devbench repos still use; it handles its own
+dry-run reporting and idempotent-reupload check internally. Its
+`file_group_id` has no default — dry-run is the only mode until it's set,
+and getting there is two real, sequenced steps, not one missing config
+value: (1) creating a new Nexus mod page isn't exposed by any API —
+checked directly against Nexus's own v3 OpenAPI schema and confirmed by
+`BUTR.NexusUploader`'s own docs — so the page has to be created by hand
+once on nexusmods.com; (2) this specific uploader also needs an existing
+file _group_ id, minted by uploading the mod's first file once on the
+website (Files tab → "API Info", or the Manage Files edit menu) — it
+doesn't create the first file either. Once both exist, set
+`file_group_id` in `nexus-upload.yml` and the `NEXUS_AUTO_UPLOAD=true`
+repo variable (plus `UNEX_APIKEY`) to let `release.yml` upload every
+subsequent version automatically.
 
 ## Safety
 
