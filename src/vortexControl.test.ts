@@ -65,6 +65,7 @@ import {
   listModRules,
   listMods,
   listNotifications,
+  listProfiles,
   listRuntimeErrors,
   pollListener,
   queryStatePath,
@@ -237,6 +238,71 @@ describe("vortexControl: profiles", () => {
     const result = await cloneProfile(fakeApi(), "p1", "MCP test");
 
     expect(result.name).toBe("MCP test");
+  });
+
+  it("listProfiles summarizes every profile without dumping full modState, sorted by lastActivated", () => {
+    vi.mocked(selectors.profiles).mockReturnValue({
+      old: {
+        id: "old",
+        name: "Old",
+        gameId: "skyrimse",
+        modState: { modA: { enabled: true, enabledTime: 0 } },
+        lastActivated: 100,
+      },
+      recent: {
+        id: "recent",
+        name: "Recent",
+        gameId: "skyrimse",
+        modState: {
+          modA: { enabled: true, enabledTime: 0 },
+          modB: { enabled: false, enabledTime: 0 },
+        },
+        lastActivated: 200,
+      },
+      removing: {
+        id: "removing",
+        name: "Being removed",
+        gameId: "skyrimse",
+        modState: {},
+        lastActivated: 50,
+        pendingRemove: true,
+      },
+    });
+    vi.mocked(selectors.activeProfileId).mockReturnValue("recent");
+
+    const result = listProfiles(fakeApi());
+
+    expect(result).toEqual([
+      {
+        id: "recent",
+        name: "Recent",
+        gameId: "skyrimse",
+        active: true,
+        modCount: 2,
+        enabledModCount: 1,
+        lastActivated: 200,
+      },
+      {
+        id: "old",
+        name: "Old",
+        gameId: "skyrimse",
+        active: false,
+        modCount: 1,
+        enabledModCount: 1,
+        lastActivated: 100,
+      },
+    ]);
+  });
+
+  it("listProfiles filters to the given gameId", () => {
+    vi.mocked(selectors.profiles).mockReturnValue({
+      se: { id: "se", name: "SE", gameId: "skyrimse", modState: {}, lastActivated: 0 },
+      vr: { id: "vr", name: "VR", gameId: "skyrimvr", modState: {}, lastActivated: 0 },
+    });
+
+    const result = listProfiles(fakeApi(), "skyrimvr");
+
+    expect(result.map((p) => p.id)).toEqual(["vr"]);
   });
 });
 

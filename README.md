@@ -89,6 +89,7 @@ hand-transcribed, so it can't silently drift from the code.
 | ----------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `vortex_describe`             | read   | Discover the live Vortex API surface: callable selector names (for vortex_query), every action/api.ext function/event/api method name dispa… |
 | `vortex_query`                | read   | Read Vortex state. Two modes: `selector` calls that named vortex-api selector as `(state, ...args)` (e.g. selector='activeProfileId', or se… |
+| `list_profiles`               | read   | List Vortex profiles (defaults to every game; pass gameId to filter to one), with name, active status, and mod counts — a formatted join vo… |
 | `list_mods`                   | read   | List mods for a game (defaults to the active game), with friendly names and enabled state for the active profile — a formatted join vortex_… |
 | `list_load_order`             | read   | List the current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index.                                                          |
 | `list_categories`             | read   | List a game's mod categories (defaults to the active game), sorted by display order, with a mod count per category — a join vortex_query ca… |

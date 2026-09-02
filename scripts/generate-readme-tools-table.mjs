@@ -23,6 +23,7 @@ const URL = `http://127.0.0.1:${PORT}/mcp`;
 const ACCESS_TIER = {
   vortex_describe: "read",
   vortex_query: "read",
+  list_profiles: "read",
   list_mods: "read",
   list_load_order: "read",
   list_categories: "read",

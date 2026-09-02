@@ -554,6 +554,39 @@ export interface ProfileSummary {
   name: string;
   gameId: string;
   active: boolean;
+  modCount: number;
+  enabledModCount: number;
+  lastActivated: number;
+}
+
+function summarizeProfile(profile: IProfile, activeProfileId: string | undefined): ProfileSummary {
+  const modStates = Object.values(profile.modState ?? {});
+  return {
+    id: profile.id,
+    name: profile.name,
+    gameId: profile.gameId,
+    active: profile.id === activeProfileId,
+    modCount: modStates.length,
+    enabledModCount: modStates.filter((m) => m.enabled).length,
+    lastActivated: profile.lastActivated,
+  };
+}
+
+/**
+ * Lists profiles (defaults to every game; pass gameId to filter to one) with name,
+ * active status, and mod counts — the join vortex_query can't do in one call without
+ * dumping the full per-profile modState (persistent.profiles.<id> can run past 500K
+ * characters for a large modlist, found live). Sorted most-recently-activated first.
+ */
+export function listProfiles(api: IExtensionApi, gameId?: string): ProfileSummary[] {
+  const st = state(api);
+  const activeProfileId = selectors.activeProfileId(st);
+  const all = Object.values(selectors.profiles(st)) as IProfile[];
+  return all
+    .filter((p) => p.pendingRemove !== true)
+    .filter((p) => gameId === undefined || p.gameId === gameId)
+    .map((p) => summarizeProfile(p, activeProfileId))
+    .toSorted((a, b) => b.lastActivated - a.lastActivated);
 }
 
 // Mirrors profile_management/util/manage.ts's profilePath — not exported from
@@ -589,12 +622,7 @@ export async function cloneProfile(
   await fs.copyAsync(profilePath(source), profilePath(newProfile));
   store(api).dispatch(actions.setProfile(newProfile));
 
-  return {
-    id: newProfile.id,
-    name: newProfile.name,
-    gameId: newProfile.gameId,
-    active: false,
-  };
+  return summarizeProfile(newProfile, selectors.activeProfileId(st));
 }
 
 export interface ListModsOptions {

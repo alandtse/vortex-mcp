@@ -157,6 +157,24 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "list_profiles",
+    {
+      description:
+        "List Vortex profiles (defaults to every game; pass gameId to filter to one), with " +
+        "name, active status, and mod counts — a formatted join vortex_query can't do in one " +
+        "call: the raw path (persistent.profiles) dumps every profile's full per-mod enabled " +
+        "state, which can run past 500K characters and blow the response limit on a large " +
+        "modlist (found live). Sorted most-recently-activated first.",
+      inputSchema: z.object({
+        gameId: z.string().optional().describe("Filter to profiles for this game id"),
+      }),
+    },
+    async ({ gameId }) => ({
+      content: [jsonText(control.listProfiles(api, gameId))],
+    }),
+  );
+
+  server.registerTool(
     "list_mods",
     {
       description:
@@ -432,7 +450,12 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
         "in one call: resolving mod ids to full IMod records and filtering to Nexus-" +
         "sourced ones before calling the underlying api.ext function. Defaults to every " +
         "installed mod with source 'nexus'; pass modIds to check a specific subset. " +
-        "Consumes the user's real Nexus API request quota — don't call this in a loop.",
+        "Consumes the user's real Nexus API request quota — don't call this in a loop. " +
+        "WARNING: the no-args (check everything) form makes one real network call per " +
+        "mod through Vortex's own nexusCheckModsVersion and has been observed to exceed " +
+        "a 300s MCP call timeout on a 50+ mod list, with no partial results if it times " +
+        "out — for anything beyond a small collection, prefer passing modIds for a " +
+        "bounded, fast check (confirmed near-instant on 3 mods) rather than the full scan.",
       inputSchema: z.object({
         gameId: z.string().optional().describe("Game id; defaults to the active game"),
         modIds: z
