@@ -247,6 +247,21 @@ const SELECTOR_HINTS = new Map<string, string>([
       "passed — it does not filter by game. Same size problem as `profiles` on top of " +
       "that. Use the list_profiles tool (which does filter correctly by gameId) instead.",
   ],
+  [
+    "downloadsForGame",
+    "Found live to run past 10M characters for a real download history (900+ entries) — " +
+      "blows the response size limit. Use the list_downloads tool instead (formatted, " +
+      "filterable by state, and paginated via limit).",
+  ],
+  [
+    "getDownloadByIds",
+    "Found live to return null regardless of argument shape tried (a single id array, or " +
+      "ids as separate positional args) — could not get this selector working through " +
+      "vortex_query. For a specific download's full record, use vortex_query with " +
+      'path=["persistent","downloads","files","<id>"] instead — confirmed working live, ' +
+      "small payload, includes the installed.modId join key list_downloads' " +
+      "installedModId is also drawn from.",
+  ],
 ]);
 
 // NOT an allowlist — every one of Vortex's ~150 action creators is dispatchable via
@@ -868,6 +883,15 @@ export interface DownloadSummary {
   progress: number;
   size: number;
   startTime: number;
+  /**
+   * The mod id this download is recorded as installed as, when set. Found live: this is
+   * the only reliable download-to-mod join key — matching by name is fragile (Nexus
+   * display names and installed mod names commonly diverge) and can be stale (Vortex
+   * updates a mod in place under the same modId, so an OLDER download of the same mod can
+   * still carry this pointer even though a newer download is what's actually deployed —
+   * don't treat this alone as proof the download's exact file content is currently live).
+   */
+  installedModId?: string;
 }
 
 export interface ListDownloadsOptions {
@@ -897,22 +921,26 @@ export function listDownloads(
       | Record<string, types.IDownload>
       | undefined) ?? {};
   const stateFilter = new Set(options.states ?? []);
-  const summaries = Object.values(files)
-    .filter((download) => download.game.includes(targetGameId))
-    .filter((download) =>
+  const summaries = Object.entries(files)
+    .filter(([, download]) => download.game.includes(targetGameId))
+    .filter(([, download]) =>
       options.states === undefined
         ? download.state !== "finished"
         : stateFilter.has(download.state),
     )
-    .toSorted((a, b) => b.startTime - a.startTime)
-    .map((download) => ({
-      id: download.id,
-      name: download.modInfo?.name ?? download.localPath ?? download.id,
+    .toSorted(([, a], [, b]) => b.startTime - a.startTime)
+    .map(([downloadId, download]) => ({
+      // download.id itself is only reliably populated for "finished" downloads — found
+      // live that a "failed" download's own id field can be undefined even though the
+      // Redux map key (downloadId here) is always the real, addressable id.
+      id: downloadId,
+      name: download.modInfo?.name ?? download.localPath ?? downloadId,
       state: download.state,
       progress:
         download.size > 0 ? Math.round(((download.received ?? 0) / download.size) * 100) : 0,
       size: download.size,
       startTime: download.startTime,
+      installedModId: (download as unknown as { installed?: { modId?: string } }).installed?.modId,
     }));
   return options.limit !== undefined ? summaries.slice(0, options.limit) : summaries;
 }
@@ -1757,13 +1785,21 @@ const EXTENSION_API_HINTS = new Map<string, string>([
   ],
   [
     "nexusSearchCollections",
-    'A single OPTIONS OBJECT, not positional args — e.g. args=[{"gameId": "skyrimvr", ' +
-      '"query": "vanilla"}] (confirmed working live, returned {nodes, totalCount}). ' +
-      "Passing a bare string instead throws a raw, unhelpful runtime error " +
-      '("search.trim is not a function") with no indication the shape is wrong — this ' +
-      "project doesn't have the exact ICollectionSearchOptions field list (it's declared " +
-      "in @nexusmods/nexus-api, not vendored here), so treat this as a starting point, " +
-      "not the full option set.",
+    'A single OPTIONS OBJECT, not positional args — e.g. args=[{"gameId": ' +
+      '"skyrimspecialedition", "search": "vanilla"}] (confirmed working live, returned ' +
+      "{nodes, totalCount}). The filter field is `search`, NOT `query` — `query` is " +
+      "silently ignored (found live: no error, just an unfiltered/empty result, so a " +
+      "typo'd field name is indistinguishable from a genuine no-match). `gameId` must be " +
+      "the NEXUS DOMAIN NAME, not Vortex's internal gameId — they differ for most games " +
+      '(Skyrim SE\'s Vortex id is "skyrimse" but its Nexus domain is ' +
+      '"skyrimspecialedition"; VR titles like "skyrimvr" happen to match, which can mask ' +
+      "this). There's no selector in this project for the Vortex-id-to-Nexus-domain " +
+      "mapping; when in doubt, try the Vortex gameId first and fall back to the game's " +
+      "known Nexus URL slug. Passing a bare string instead of an options object throws a " +
+      'raw, unhelpful runtime error ("search.trim is not a function") with no indication ' +
+      "the shape is wrong — this project doesn't have the exact ICollectionSearchOptions " +
+      "field list (it's declared in @nexusmods/nexus-api, not vendored here), so treat " +
+      "this as a starting point, not the full option set.",
   ],
 ]);
 

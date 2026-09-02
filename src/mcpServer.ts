@@ -236,13 +236,18 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
     {
       description:
         "List the download queue/history for a game (defaults to the active game): name, " +
-        "state, progress percent, size, start time — a formatted view raw vortex_query " +
-        "selectors (downloadsForGame/activeDownloads) don't give you in one call. Defaults " +
-        "to every state except 'finished' (found live: a real download history can run " +
-        "hundreds of entries deep and blow the response size limit if you dump it all — " +
-        "what's usually wanted is what's active/stuck/failed, not the archive). Pass " +
-        "states=['finished'] (optionally alongside others) to include completed downloads; " +
-        "use limit to cap results, most-recently-started first.",
+        "state, progress percent, size, start time, installedModId — a formatted view raw " +
+        "vortex_query selectors (downloadsForGame/activeDownloads) don't give you in one " +
+        "call. Defaults to every state except 'finished' (found live: a real download " +
+        "history can run hundreds of entries deep and blow the response size limit if you " +
+        "dump it all — what's usually wanted is what's active/stuck/failed, not the " +
+        "archive). Pass states=['finished'] (optionally alongside others) to include " +
+        "completed downloads; use limit to cap results, most-recently-started first. To " +
+        "check whether a specific download is currently installed as a mod, use " +
+        "installedModId (matches list_mods'/find_mod_by_file's id) rather than matching by " +
+        "name — Nexus display names and installed-mod names commonly diverge. Note: " +
+        "installedModId can be stale for a superseded download of a mod that's since been " +
+        "updated in place under the same modId.",
       inputSchema: z.object({
         gameId: z.string().optional().describe("Game id; defaults to the active game"),
         states: z

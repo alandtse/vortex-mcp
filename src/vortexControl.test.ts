@@ -123,6 +123,8 @@ describe("vortexControl: reflection", () => {
     expect(result.listenerHints.onStateChange).toContain("__CALLBACK__");
     expect(result.selectorHints.knownGames).toContain("discovered");
     expect(result.selectorHints.gameProfiles).toContain("does not filter");
+    expect(result.selectorHints.downloadsForGame).toContain("list_downloads");
+    expect(result.selectorHints.getDownloadByIds).toContain("null");
   });
 
   it("describeApi surfaces api.ext names as extensionApis without exposing the functions", () => {
@@ -938,6 +940,54 @@ describe("vortexControl: listDownloads", () => {
     });
 
     expect(listDownloads(api, undefined, { limit: 2 }).map((d) => d.id)).toEqual(["b", "c"]);
+  });
+
+  it("falls back to the Redux map key for id when the record's own id field is undefined (seen live on 'failed' downloads)", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        downloads: {
+          files: {
+            B1gem3HNfC: {
+              game: ["skyrimse"],
+              state: "failed",
+              size: 1,
+              startTime: 1,
+              modInfo: { name: "Some Mod" },
+            },
+          },
+        },
+      },
+    });
+
+    expect(listDownloads(api).map((d) => d.id)).toEqual(["B1gem3HNfC"]);
+  });
+
+  it("surfaces installedModId from download.installed.modId as the download-to-mod join key", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        downloads: {
+          files: {
+            d1: {
+              id: "d1",
+              game: ["skyrimse"],
+              state: "paused",
+              size: 1,
+              startTime: 1,
+              installed: { gameId: "skyrimse", modId: "Cool Mod-123" },
+            },
+            d2: { id: "d2", game: ["skyrimse"], state: "paused", size: 1, startTime: 2 },
+          },
+        },
+      },
+    });
+
+    const result = listDownloads(api);
+    expect(result.find((d) => d.id === "d1")?.installedModId).toBe("Cool Mod-123");
+    expect(result.find((d) => d.id === "d2")?.installedModId).toBeUndefined();
   });
 });
 
