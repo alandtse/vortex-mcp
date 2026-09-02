@@ -665,7 +665,13 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
         "in Vortex's own backup folder (%APPDATA%/vortex/temp/state_backups_full) — the same " +
         "data Vortex's own manual/hourly backups capture, reproduced from the published API " +
         "since the backup function itself isn't exported. Pure read + file write; does not " +
-        "touch Vortex's live state.",
+        "touch Vortex's live state. CONFIG/METADATA ONLY: profile definitions, per-mod " +
+        "enabled state, load order (nested under persistent, not a top-level key despite " +
+        "'persistent' sounding generic), categories, download records — NOT the mod files " +
+        "or archives themselves; this alone can't recover deleted mod content, only Vortex's " +
+        "record of what was installed/enabled/ordered. There's no matching restore tool " +
+        "exposed here — restoring from this file is a manual step via Vortex's own Settings " +
+        "> Workarounds UI outside this MCP server's reach.",
       inputSchema: z.object({
         name: z
           .string()

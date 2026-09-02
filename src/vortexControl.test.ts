@@ -120,6 +120,8 @@ describe("vortexControl: reflection", () => {
     expect(result.extensionApiHints.nexusGetModInfo).toContain("gameId: string");
     expect(result.extensionApiHints.nexusSearchCollections).toContain("OPTIONS OBJECT");
     expect(result.eventHints["deploy-mods"]).toContain("__CALLBACK__");
+    expect(result.eventHints["autosort-plugins"]).toContain("ACTIVE profile");
+    expect(result.extensionApiHints.lootSortAsync).toContain("pluginFilePaths");
     expect(result.listenerHints.onStateChange).toContain("__CALLBACK__");
     expect(result.selectorHints.knownGames).toContain("discovered");
     expect(result.selectorHints.gameProfiles).toContain("does not filter");

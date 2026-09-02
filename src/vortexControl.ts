@@ -402,6 +402,17 @@ const EVENT_HINTS = new Map<string, string>([
     "gameId: string — fire-and-forget, no callback (omit the sentinel entirely). Vortex " +
       "validates the id itself; an unknown gameId silently no-ops rather than throwing.",
   ],
+  [
+    "autosort-plugins",
+    'force: boolean, "__CALLBACK__" (optional — read from Vortex source, ' +
+      "gamebryo-plugin-management/src/index.ts and PluginList.tsx: some call sites omit " +
+      "the callback entirely for fire-and-forget). Runs a LOOT sort on the ACTIVE " +
+      "profile's plugin list (no profileId/gameId arg — there's no way to target a " +
+      "non-active profile). force=true re-sorts even if Vortex thinks nothing changed; " +
+      "force=false honors the user's auto-sort setting and may no-op. Re-check " +
+      "list_load_order afterward to see the result — this event doesn't return the new " +
+      "order itself even via the callback (callback only reports err).",
+  ],
 ]);
 
 async function dispatchEvent(api: IExtensionApi, name: string, args: unknown[]): Promise<unknown> {
@@ -1782,6 +1793,18 @@ const EXTENSION_API_HINTS = new Map<string, string>([
     'gameId: string (plain positional string, e.g. args=["skyrimvr"]) — returns the ' +
       "installed/downloaded collections for that game, or null if there are none (found " +
       "live: null on a game with none, not an error).",
+  ],
+  [
+    "lootSortAsync",
+    "A SINGLE OBJECT arg (read from Vortex source, " +
+      "gamebryo-plugin-management/src/index.ts registerAPI('lootSortAsync', ...)): " +
+      "{pluginFilePaths: string[], onSortCallback: (err: Error, sortedPluginNames: " +
+      "string[]) => void} — NOT (gameId, mods, callback) positional args. Sorts the " +
+      "ACTIVE profile's plugins via LOOT (no profileId/gameId arg); pluginFilePaths is " +
+      "the list of plugin file paths to sort, not just names. Prefer dispatching the " +
+      "autosort-plugins event instead if you just want 'sort like the in-app Sort Now " +
+      "button' — that's what the UI itself calls, and it doesn't require assembling " +
+      "pluginFilePaths yourself.",
   ],
   [
     "nexusSearchCollections",
