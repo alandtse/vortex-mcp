@@ -1026,10 +1026,14 @@ async function listModFiles(stagingRoot: string, installationPath: string): Prom
   return files;
 }
 
+// settings.mods.installPath[gameId] is a raw, unresolved template (e.g. "E:\Vortex
+// Mods\{game}" — found live, "{game}"/"{userdata}"/"{username}" placeholders via the
+// string-template package) — reading it directly, as this used to, silently produced a
+// staging root that doesn't exist on disk, so every scan under it (findModByFile among
+// others) failed closed with an empty result instead of an error. installPathForGame
+// resolves the placeholders the same way Vortex's own mod-install code does.
 function stagingRootFor(api: IExtensionApi, gameId: string): string {
-  const stagingRoot = queryStatePath(api, ["settings", "mods", "installPath", gameId]) as
-    | string
-    | undefined;
+  const stagingRoot = selectors.installPathForGame(state(api), gameId) as string | undefined;
   if (stagingRoot === undefined) {
     throw new Error(`No mod staging path configured for ${gameId}`);
   }

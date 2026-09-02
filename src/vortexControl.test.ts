@@ -24,6 +24,7 @@ vi.mock("@nexusmods/vortex-api", () => ({
     activeGameId: vi.fn<() => string | undefined>(),
     knownGames: vi.fn<() => Array<{ id: string }>>(),
     notifications: vi.fn<() => unknown[]>(),
+    installPathForGame: vi.fn<(state: unknown, gameId: string) => string | undefined>(),
   },
   util: {
     renderModName: vi.fn((mod: { id: string }) => mod.id),
@@ -1032,9 +1033,9 @@ describe("vortexControl: findModByFile / listFileConflicts", () => {
   ) {
     vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
     vi.mocked(selectors.activeProfile).mockReturnValue({ gameId: "skyrimse", modState } as never);
+    vi.mocked(selectors.installPathForGame).mockReturnValue(tempRoot);
     const api = fakeApi();
     (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
-      settings: { mods: { installPath: { skyrimse: tempRoot } } },
       persistent: { mods: { skyrimse: mods } },
     });
     return api;
@@ -1303,9 +1304,9 @@ describe("vortexControl: listDuplicateMods", () => {
   ) {
     vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
     vi.mocked(selectors.activeProfile).mockReturnValue({ gameId: "skyrimse", modState } as never);
+    vi.mocked(selectors.installPathForGame).mockReturnValue(tempRoot);
     const api = fakeApi();
     (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
-      settings: { mods: { installPath: { skyrimse: tempRoot } } },
       persistent: { mods: { skyrimse: mods } },
     });
     return api;
