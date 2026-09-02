@@ -783,17 +783,19 @@ describe("vortexControl: listDownloads", () => {
             d1: {
               id: "d1",
               game: ["skyrimse"],
-              state: "finished",
+              state: "paused",
               size: 200,
               received: 200,
+              startTime: 100,
               modInfo: { name: "Cool Mod" },
             },
             d2: {
               id: "d2",
               game: ["fallout4"],
-              state: "finished",
+              state: "paused",
               size: 100,
               received: 100,
+              startTime: 200,
             },
             d3: {
               id: "d3",
@@ -801,6 +803,7 @@ describe("vortexControl: listDownloads", () => {
               state: "downloading",
               size: 400,
               received: 100,
+              startTime: 50,
               localPath: "mod3.zip",
             },
           },
@@ -809,8 +812,15 @@ describe("vortexControl: listDownloads", () => {
     });
 
     expect(listDownloads(api)).toEqual([
-      { id: "d1", name: "Cool Mod", state: "finished", progress: 100, size: 200 },
-      { id: "d3", name: "mod3.zip", state: "downloading", progress: 25, size: 400 },
+      { id: "d1", name: "Cool Mod", state: "paused", progress: 100, size: 200, startTime: 100 },
+      {
+        id: "d3",
+        name: "mod3.zip",
+        state: "downloading",
+        progress: 25,
+        size: 400,
+        startTime: 50,
+      },
     ]);
   });
 
@@ -830,8 +840,9 @@ describe("vortexControl: listDownloads", () => {
             d1: {
               id: "d1",
               game: ["skyrimse"],
-              state: "finished",
+              state: "started",
               size: 200,
+              startTime: 0,
               localPath: "mod1.zip",
             },
           },
@@ -840,8 +851,62 @@ describe("vortexControl: listDownloads", () => {
     });
 
     expect(listDownloads(api)).toEqual([
-      { id: "d1", name: "mod1.zip", state: "finished", progress: 0, size: 200 },
+      { id: "d1", name: "mod1.zip", state: "started", progress: 0, size: 200, startTime: 0 },
     ]);
+  });
+
+  it("excludes 'finished' downloads by default (a real history can run hundreds deep)", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        downloads: {
+          files: {
+            done: { id: "done", game: ["skyrimse"], state: "finished", size: 1, startTime: 1 },
+            failed: { id: "failed", game: ["skyrimse"], state: "failed", size: 1, startTime: 2 },
+          },
+        },
+      },
+    });
+
+    expect(listDownloads(api).map((d) => d.id)).toEqual(["failed"]);
+  });
+
+  it("includes 'finished' when explicitly requested via states", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        downloads: {
+          files: {
+            done: { id: "done", game: ["skyrimse"], state: "finished", size: 1, startTime: 1 },
+            failed: { id: "failed", game: ["skyrimse"], state: "failed", size: 1, startTime: 2 },
+          },
+        },
+      },
+    });
+
+    expect(listDownloads(api, undefined, { states: ["finished"] }).map((d) => d.id)).toEqual([
+      "done",
+    ]);
+  });
+
+  it("sorts most-recently-started first and applies limit", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        downloads: {
+          files: {
+            a: { id: "a", game: ["skyrimse"], state: "paused", size: 1, startTime: 10 },
+            b: { id: "b", game: ["skyrimse"], state: "paused", size: 1, startTime: 30 },
+            c: { id: "c", game: ["skyrimse"], state: "paused", size: 1, startTime: 20 },
+          },
+        },
+      },
+    });
+
+    expect(listDownloads(api, undefined, { limit: 2 }).map((d) => d.id)).toEqual(["b", "c"]);
   });
 });
 

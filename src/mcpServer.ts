@@ -233,14 +233,32 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
     {
       description:
         "List the download queue/history for a game (defaults to the active game): name, " +
-        "state, progress percent, size — a formatted view raw vortex_query selectors " +
-        "(downloadsForGame/activeDownloads) don't give you in one call.",
+        "state, progress percent, size, start time — a formatted view raw vortex_query " +
+        "selectors (downloadsForGame/activeDownloads) don't give you in one call. Defaults " +
+        "to every state except 'finished' (found live: a real download history can run " +
+        "hundreds of entries deep and blow the response size limit if you dump it all — " +
+        "what's usually wanted is what's active/stuck/failed, not the archive). Pass " +
+        "states=['finished'] (optionally alongside others) to include completed downloads; " +
+        "use limit to cap results, most-recently-started first.",
       inputSchema: z.object({
         gameId: z.string().optional().describe("Game id; defaults to the active game"),
+        states: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Only these download states (init/started/paused/finalizing/finished/failed/" +
+              "redirect); omit for every state except 'finished'",
+          ),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Cap the number of results, most-recently-started first"),
       }),
     },
-    async ({ gameId }) => ({
-      content: [jsonText(control.listDownloads(api, gameId))],
+    async ({ gameId, states, limit }) => ({
+      content: [jsonText(control.listDownloads(api, gameId, { states, limit }))],
     }),
   );
 

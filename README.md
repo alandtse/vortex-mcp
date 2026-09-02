@@ -93,7 +93,7 @@ hand-transcribed, so it can't silently drift from the code.
 | `list_mods`                   | read   | List mods for a game (defaults to the active game), with friendly names and enabled state for the active profile — a formatted join vortex_… |
 | `list_load_order`             | read   | List the current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index.                                                          |
 | `list_categories`             | read   | List a game's mod categories (defaults to the active game), sorted by display order, with a mod count per category — a join vortex_query ca… |
-| `list_downloads`              | read   | List the download queue/history for a game (defaults to the active game): name, state, progress percent, size — a formatted view raw vortex… |
+| `list_downloads`              | read   | List the download queue/history for a game (defaults to the active game): name, state, progress percent, size, start time — a formatted vie… |
 | `list_notifications`          | read   | List Vortex's current notifications (errors, warnings, info) — what Vortex itself is currently flagging as a problem, useful for diagnosing… |
 | `list_mod_rules`              | read   | List a mod's dependency/conflict rules (before/after/requires/conflicts/...), resolving each reference to the target mod's friendly name wh… |
 | `find_mod_by_file`            | read   | Find which installed mod(s) contain a file with this name, by scanning mod staging folders on disk (no reflectable API exposes this).        |

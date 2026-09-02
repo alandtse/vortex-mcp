@@ -814,9 +814,29 @@ export interface DownloadSummary {
   state: string;
   progress: number;
   size: number;
+  startTime: number;
 }
 
-export function listDownloads(api: IExtensionApi, gameId?: string): DownloadSummary[] {
+export interface ListDownloadsOptions {
+  /**
+   * Only include downloads in one of these states ("init"/"started"/"paused"/
+   * "finalizing"/"finished"/"failed"/"redirect"). Default: every state except
+   * "finished" — found live that an unfiltered dump of a real download history
+   * (932 entries, 921 of them long-finished) blows the response size limit;
+   * what's actually being asked for is almost always "what's active/stuck/
+   * failed", not the archive. Pass states: ["finished"] (or include it
+   * alongside others) to see completed downloads too.
+   */
+  states?: string[];
+  /** Cap the number of results, most-recently-started first. Default unlimited. */
+  limit?: number;
+}
+
+export function listDownloads(
+  api: IExtensionApi,
+  gameId?: string,
+  options: ListDownloadsOptions = {},
+): DownloadSummary[] {
   const st = state(api);
   const targetGameId = gameId ?? selectors.activeGameId(st);
   if (!targetGameId) {
@@ -826,8 +846,15 @@ export function listDownloads(api: IExtensionApi, gameId?: string): DownloadSumm
     (queryStatePath(api, ["persistent", "downloads", "files"]) as
       | Record<string, types.IDownload>
       | undefined) ?? {};
-  return Object.values(files)
+  const stateFilter = new Set(options.states ?? []);
+  const summaries = Object.values(files)
     .filter((download) => download.game.includes(targetGameId))
+    .filter((download) =>
+      options.states === undefined
+        ? download.state !== "finished"
+        : stateFilter.has(download.state),
+    )
+    .toSorted((a, b) => b.startTime - a.startTime)
     .map((download) => ({
       id: download.id,
       name: download.modInfo?.name ?? download.localPath ?? download.id,
@@ -835,7 +862,9 @@ export function listDownloads(api: IExtensionApi, gameId?: string): DownloadSumm
       progress:
         download.size > 0 ? Math.round(((download.received ?? 0) / download.size) * 100) : 0,
       size: download.size,
+      startTime: download.startTime,
     }));
+  return options.limit !== undefined ? summaries.slice(0, options.limit) : summaries;
 }
 
 export interface NotificationSummary {
