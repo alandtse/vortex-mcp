@@ -83,6 +83,29 @@ function store(api: IExtensionApi) {
   return api.store;
 }
 
+/**
+ * Resolves a caller-supplied gameId (falling back to the active game) and validates it
+ * against Vortex's own known-games catalog. Found live: without the validation half, a
+ * typo'd gameId (e.g. a game that was never installed, or a misspelling) silently
+ * produced an empty result from every read tool that scopes to a game — indistinguishable
+ * from "this game genuinely has nothing installed for it" — rather than a clear error.
+ */
+function resolveGameId(gameId: string | undefined, st: types.IState): string {
+  const targetGameId = gameId ?? selectors.activeGameId(st);
+  if (!targetGameId) {
+    throw new Error("No active game and no gameId provided");
+  }
+  const known = selectors.knownGames(st) as { id: string }[];
+  if (!known.some((g) => g.id === targetGameId)) {
+    throw new Error(
+      `Unknown gameId: "${targetGameId}" — not in Vortex's known-games catalog. Query ` +
+        'vortex_query({selector: "discovered"}) for games Vortex has actually found ' +
+        "installed.",
+    );
+  }
+  return targetGameId;
+}
+
 export interface ApiDescription {
   /** Names callable via query({ selector, args }) — each is (state, ...args) => value. */
   selectors: string[];
@@ -659,10 +682,7 @@ export function listMods(
   options: ListModsOptions = {},
 ): ModSummary[] {
   const st = state(api);
-  const targetGameId = gameId ?? selectors.activeGameId(st);
-  if (!targetGameId) {
-    throw new Error("No active game and no gameId provided");
-  }
+  const targetGameId = resolveGameId(gameId, st);
   const profile = selectors.activeProfile(st);
   const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
   const nameFilterLower = options.nameFilter?.toLowerCase();
@@ -698,10 +718,7 @@ export interface CategorySummary {
  */
 export function listCategories(api: IExtensionApi, gameId?: string): CategorySummary[] {
   const st = state(api);
-  const targetGameId = gameId ?? selectors.activeGameId(st);
-  if (!targetGameId) {
-    throw new Error("No active game and no gameId provided");
-  }
+  const targetGameId = resolveGameId(gameId, st);
   const categories =
     (queryStatePath(api, ["persistent", "categories", targetGameId]) as
       | Record<string, { name: string; order: number; parentCategory?: string }>
@@ -794,10 +811,7 @@ interface DiscoveredTool {
  */
 export async function launchGame(api: IExtensionApi, gameId?: string): Promise<void> {
   const st = state(api);
-  const targetGameId = gameId ?? selectors.activeGameId(st);
-  if (!targetGameId) {
-    throw new Error("No active game and no gameId provided");
-  }
+  const targetGameId = resolveGameId(gameId, st);
   const toolId = queryStatePath(api, ["settings", "interface", "primaryTool", targetGameId]) as
     | string
     | undefined;
@@ -857,10 +871,7 @@ export function listDownloads(
   options: ListDownloadsOptions = {},
 ): DownloadSummary[] {
   const st = state(api);
-  const targetGameId = gameId ?? selectors.activeGameId(st);
-  if (!targetGameId) {
-    throw new Error("No active game and no gameId provided");
-  }
+  const targetGameId = resolveGameId(gameId, st);
   const files =
     (queryStatePath(api, ["persistent", "downloads", "files"]) as
       | Record<string, types.IDownload>
@@ -964,10 +975,7 @@ export interface ModRuleSummary {
  */
 export function listModRules(api: IExtensionApi, modId: string, gameId?: string): ModRuleSummary[] {
   const st = state(api);
-  const targetGameId = gameId ?? selectors.activeGameId(st);
-  if (!targetGameId) {
-    throw new Error("No active game and no gameId provided");
-  }
+  const targetGameId = resolveGameId(gameId, st);
   const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
   const mod = mods[modId];
   if (mod === undefined) {
@@ -1060,10 +1068,7 @@ export async function findModByFile(
   options: { gameId?: string; includeDisabled?: boolean } = {},
 ): Promise<ModFileMatch[]> {
   const st = state(api);
-  const targetGameId = options.gameId ?? selectors.activeGameId(st);
-  if (!targetGameId) {
-    throw new Error("No active game and no gameId provided");
-  }
+  const targetGameId = resolveGameId(options.gameId, st);
   const stagingRoot = stagingRootFor(api, targetGameId);
   const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
   const profile = selectors.activeProfile(st);
@@ -1137,10 +1142,7 @@ export async function listFileConflicts(
   options: { gameId?: string; nameFilter?: string; limit?: number } = {},
 ): Promise<FileConflictEntry[]> {
   const st = state(api);
-  const targetGameId = options.gameId ?? selectors.activeGameId(st);
-  if (!targetGameId) {
-    throw new Error("No active game and no gameId provided");
-  }
+  const targetGameId = resolveGameId(options.gameId, st);
   const stagingRoot = stagingRootFor(api, targetGameId);
   const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
   const profile = selectors.activeProfile(st);
@@ -1234,10 +1236,7 @@ export async function findMissingMasters(
   gameId?: string,
 ): Promise<MissingMastersEntry[]> {
   const st = state(api);
-  const targetGameId = gameId ?? selectors.activeGameId(st);
-  if (!targetGameId) {
-    throw new Error("No active game and no gameId provided");
-  }
+  const targetGameId = resolveGameId(gameId, st);
   const gamePath = queryStatePath(api, [
     "settings",
     "gameMode",
@@ -1306,10 +1305,7 @@ export async function listRuntimeErrors(
   options: { gameId?: string; maxCrashLogs?: number } = {},
 ): Promise<RuntimeErrorEntry[]> {
   const st = state(api);
-  const targetGameId = options.gameId ?? selectors.activeGameId(st);
-  if (!targetGameId) {
-    throw new Error("No active game and no gameId provided");
-  }
+  const targetGameId = resolveGameId(options.gameId, st);
   const myGamesFolder = MY_GAMES_FOLDER[targetGameId];
   if (myGamesFolder === undefined) {
     throw new Error(
@@ -1392,10 +1388,7 @@ export async function listDuplicateMods(
   options: { gameId?: string; includeDisabled?: boolean } = {},
 ): Promise<DuplicateModGroup[]> {
   const st = state(api);
-  const targetGameId = options.gameId ?? selectors.activeGameId(st);
-  if (!targetGameId) {
-    throw new Error("No active game and no gameId provided");
-  }
+  const targetGameId = resolveGameId(options.gameId, st);
   const stagingRoot = stagingRootFor(api, targetGameId);
   const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
   const profile = selectors.activeProfile(st);
@@ -1489,10 +1482,7 @@ export function listKnownModConflicts(
   gameId?: string,
 ): KnownModConflictMatch[] {
   const st = state(api);
-  const targetGameId = gameId ?? selectors.activeGameId(st);
-  if (!targetGameId) {
-    throw new Error("No active game and no gameId provided");
-  }
+  const targetGameId = resolveGameId(gameId, st);
   const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
   const profile = selectors.activeProfile(st);
   const isEnabled = (modId: string): boolean =>
@@ -1554,10 +1544,7 @@ export async function findMissingDeployedFiles(
   gameId?: string,
 ): Promise<DeploymentDiscrepancy[]> {
   const st = state(api);
-  const targetGameId = gameId ?? selectors.activeGameId(st);
-  if (!targetGameId) {
-    throw new Error("No active game and no gameId provided");
-  }
+  const targetGameId = resolveGameId(gameId, st);
   const myGamesFolder = MY_GAMES_FOLDER[targetGameId];
   if (myGamesFolder === undefined) {
     throw new Error(
@@ -1665,10 +1652,7 @@ export async function checkNexusModUpdates(
   modIds?: string[],
 ): Promise<ModUpdateCheckResult> {
   const st = state(api);
-  const targetGameId = gameId ?? selectors.activeGameId(st);
-  if (!targetGameId) {
-    throw new Error("No active game and no gameId provided");
-  }
+  const targetGameId = resolveGameId(gameId, st);
   const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
   const targetMods = (modIds ?? Object.keys(mods))
     .map((id) => mods[id])

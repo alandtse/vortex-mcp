@@ -22,7 +22,13 @@ vi.mock("@nexusmods/vortex-api", () => ({
     activeProfile: vi.fn<() => unknown>(),
     profiles: vi.fn<() => Record<string, unknown>>(),
     activeGameId: vi.fn<() => string | undefined>(),
-    knownGames: vi.fn<() => Array<{ id: string }>>(),
+    // Default covers every gameId literal used across this file's tests; the
+    // resolveGameId-specific tests override this to exercise the unknown-gameId path.
+    knownGames: vi.fn<() => Array<{ id: string }>>(() => [
+      { id: "skyrimse" },
+      { id: "skyrimvr" },
+      { id: "fallout4" },
+    ]),
     notifications: vi.fn<() => unknown[]>(),
     installPathForGame: vi.fn<(state: unknown, gameId: string) => string | undefined>(),
   },
@@ -305,6 +311,26 @@ describe("vortexControl: profiles", () => {
     const result = listProfiles(fakeApi(), "skyrimvr");
 
     expect(result.map((p) => p.id)).toEqual(["vr"]);
+  });
+});
+
+describe("vortexControl: resolveGameId (via listMods)", () => {
+  it("throws a clear error for a gameId not in Vortex's known-games catalog", () => {
+    vi.mocked(selectors.activeProfile).mockReturnValue(undefined as never);
+
+    expect(() => listMods(fakeApi(), "not-a-real-game-12345")).toThrow(
+      /Unknown gameId: "not-a-real-game-12345"/,
+    );
+  });
+
+  it("accepts a gameId that is in the known-games catalog even if it has no mods", () => {
+    vi.mocked(selectors.activeProfile).mockReturnValue(undefined as never);
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: { mods: {} },
+    });
+
+    expect(listMods(api, "fallout4")).toEqual([]);
   });
 });
 
@@ -1274,9 +1300,18 @@ describe("vortexControl: listRuntimeErrors", () => {
     expect(await listRuntimeErrors(fakeApi())).toEqual([]);
   });
 
-  it("throws a clear error for a game with no verified save-data folder", async () => {
-    await expect(listRuntimeErrors(fakeApi(), { gameId: "someUnknownGame" })).rejects.toThrow(
+  it("throws a clear error for a real, known game with no verified save-data folder", async () => {
+    // "fallout4" is in the knownGames mock (so it clears resolveGameId's validation) but
+    // deliberately absent from MY_GAMES_FOLDER, exercising that check specifically rather
+    // than the earlier "is this gameId even real" one.
+    await expect(listRuntimeErrors(fakeApi(), { gameId: "fallout4" })).rejects.toThrow(
       /Don't know the save-data folder/,
+    );
+  });
+
+  it("throws a clear error for a gameId Vortex has never heard of", async () => {
+    await expect(listRuntimeErrors(fakeApi(), { gameId: "someUnknownGame" })).rejects.toThrow(
+      /Unknown gameId/,
     );
   });
 });
