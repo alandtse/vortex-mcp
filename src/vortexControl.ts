@@ -1677,6 +1677,97 @@ export function listKnownModConflicts(
   return matches;
 }
 
+export interface UnsolvedConflict {
+  modId: string;
+  modName: string;
+  otherModId: string;
+  otherModName: string;
+  /** Absolute paths of the specific files both mods provide. */
+  files: string[];
+  /**
+   * Vortex's OWN computed recommendation for resolving this specific conflict, when it
+   * has one confident answer (found live: this is real data from the built-in
+   * mod-dependency-manager extension's determineConflicts, the same "Suggested" option
+   * offered in Vortex's own conflict-resolution dialog — not something this project
+   * invented). `null` means Vortex has no confident suggestion for this pair (e.g.
+   * mixed/contradictory signals) and a human has to choose. To apply a non-null
+   * suggestion: vortex_dispatch action="addModRule" args=[gameId, modId, {type:
+   * suggestion, reference: {id: otherModId}}] — "modId" here is THIS entry's modId, not
+   * otherModId; get the direction backwards and you'll load the wrong mod first.
+   */
+  suggestion: "before" | "after" | null;
+}
+
+/**
+ * Surfaces file conflicts between currently-enabled mods that have NO rule resolving
+ * them yet (before/after/conflicts-type, checked on both mods, either direction) — the
+ * read side of Vortex's own conflict-resolution ("Set Rule") workflow, which
+ * list_file_conflicts explicitly declines to editorialize on. A genuine join reflection
+ * can't do in one call: state.session.dependencies.conflicts (populated by the built-in
+ * mod-dependency-manager extension, kept live in sync with mod/profile changes — found
+ * live via reading that extension's own source, not published in @nexusmods/vortex-api's
+ * types) records each conflicting pair TWICE, once under each mod's id, so this dedupes
+ * by unordered pair and cross-references mod.rules on both sides to drop anything already
+ * resolved, exactly mirroring that extension's own isConflictResolved logic. Always
+ * scoped to the ACTIVE game — this data has no gameId axis to query by (mirrors
+ * list_load_order in that respect).
+ */
+export function listUnsolvedConflicts(api: IExtensionApi): UnsolvedConflict[] {
+  const st = state(api);
+  const targetGameId = selectors.activeGameId(st) as string | undefined;
+  if (targetGameId === undefined || targetGameId.length === 0) {
+    throw new Error("No active game — file conflicts are only tracked for the active game.");
+  }
+  const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
+  const conflicts =
+    (queryStatePath(api, ["session", "dependencies", "conflicts"]) as
+      | Record<
+          string,
+          Array<{
+            otherMod: { id: string; name?: string };
+            files: string[];
+            suggestion: "before" | "after" | null;
+          }>
+        >
+      | undefined) ?? {};
+
+  type RealModRule = { type: string; reference: { id?: string; idHint?: string } };
+  const CONFLICT_RULE_TYPES = new Set(["before", "after", "conflicts"]);
+  const hasResolvingRule = (fromId: string, towardId: string): boolean =>
+    ((mods[fromId]?.rules ?? []) as unknown as RealModRule[]).some(
+      (rule) =>
+        CONFLICT_RULE_TYPES.has(rule.type) &&
+        (rule.reference.id === towardId || rule.reference.idHint === towardId),
+    );
+  const isResolved = (modId: string, otherModId: string): boolean =>
+    hasResolvingRule(modId, otherModId) || hasResolvingRule(otherModId, modId);
+
+  const result: UnsolvedConflict[] = [];
+  const seenPairs = new Set<string>();
+  for (const [modId, entries] of Object.entries(conflicts)) {
+    for (const entry of entries) {
+      const otherModId = entry.otherMod.id;
+      const pairKey = [modId, otherModId].toSorted().join(":");
+      if (seenPairs.has(pairKey)) {
+        continue;
+      }
+      seenPairs.add(pairKey);
+      if (isResolved(modId, otherModId)) {
+        continue;
+      }
+      result.push({
+        modId,
+        modName: mods[modId] !== undefined ? util.renderModName(mods[modId]) : modId,
+        otherModId,
+        otherModName: entry.otherMod.name ?? otherModId,
+        files: entry.files,
+        suggestion: entry.suggestion,
+      });
+    }
+  }
+  return result;
+}
+
 export interface DeploymentDiscrepancy {
   plugin: string;
   /**

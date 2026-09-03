@@ -76,6 +76,7 @@ import {
   listNotifications,
   listProfiles,
   listRuntimeErrors,
+  listUnsolvedConflicts,
   pollListener,
   queryStatePath,
   querySelector,
@@ -1779,6 +1780,90 @@ describe("vortexControl: listKnownModConflicts", () => {
     const result = listKnownModConflicts(api);
     expect(result).toHaveLength(2);
     expect(result.map((r) => r.versionMatch)).toEqual(["<2.0.12||>2.0.12", "<2.0.11||>2.0.11"]);
+  });
+});
+
+describe("vortexControl: listUnsolvedConflicts", () => {
+  function apiWithConflicts(
+    mods: Record<string, { rules?: unknown[] }>,
+    conflicts: Record<string, unknown[]>,
+  ) {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: { mods: { skyrimse: mods } },
+      session: { dependencies: { conflicts } },
+    });
+    return api;
+  }
+
+  it("surfaces an unresolved conflict with Vortex's own suggestion", () => {
+    const api = apiWithConflicts(
+      {
+        modA: { id: "modA", installationPath: "", type: "" } as never,
+        modB: { id: "modB", installationPath: "", type: "" } as never,
+      },
+      {
+        modA: [
+          {
+            otherMod: { id: "modB", name: "Mod B" },
+            files: ["Data/x.esp"],
+            suggestion: "before",
+          },
+        ],
+      },
+    );
+
+    expect(listUnsolvedConflicts(api)).toEqual([
+      {
+        modId: "modA",
+        modName: "modA",
+        otherModId: "modB",
+        otherModName: "Mod B",
+        files: ["Data/x.esp"],
+        suggestion: "before",
+      },
+    ]);
+  });
+
+  it("dedupes a conflict recorded under both mods' keys (bidirectional state)", () => {
+    const api = apiWithConflicts(
+      {
+        modA: { id: "modA", installationPath: "", type: "" } as never,
+        modB: { id: "modB", installationPath: "", type: "" } as never,
+      },
+      {
+        modA: [{ otherMod: { id: "modB" }, files: ["x.esp"], suggestion: "before" }],
+        modB: [{ otherMod: { id: "modA" }, files: ["x.esp"], suggestion: "after" }],
+      },
+    );
+
+    expect(listUnsolvedConflicts(api)).toHaveLength(1);
+  });
+
+  it("drops a conflict already resolved by a before/after/conflicts rule on either mod", () => {
+    const api = apiWithConflicts(
+      {
+        modA: {
+          id: "modA",
+          installationPath: "",
+          type: "",
+          rules: [{ type: "before", reference: { id: "modB" } }],
+        } as never,
+        modB: { id: "modB", installationPath: "", type: "" } as never,
+      },
+      {
+        modA: [{ otherMod: { id: "modB" }, files: ["x.esp"], suggestion: "before" }],
+      },
+    );
+
+    expect(listUnsolvedConflicts(api)).toEqual([]);
+  });
+
+  it("throws when there is no active game", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("");
+
+    expect(() => listUnsolvedConflicts(fakeApi())).toThrow(/No active game/);
   });
 });
 

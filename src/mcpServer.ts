@@ -469,6 +469,29 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "list_unsolved_conflicts",
+    {
+      description:
+        "List file conflicts between enabled mods that have NO rule resolving them yet — " +
+        "the read side of Vortex's own conflict-resolution ('Set Rule') workflow, which " +
+        "list_file_conflicts deliberately declines to editorialize on. Each entry " +
+        "includes Vortex's OWN suggestion (before/after/null), the same recommendation " +
+        "its in-app conflict dialog offers as 'Use Suggested' — real computed data from " +
+        "the built-in mod-dependency-manager extension, not invented. To apply a " +
+        "non-null suggestion: vortex_dispatch action='addModRule' args=[gameId, modId, " +
+        "{type: suggestion, reference: {id: otherModId}}] — modId/otherModId come from " +
+        "THIS entry, and the direction matters (get modId/otherModId backwards and " +
+        "you'll order the mods the wrong way). A null suggestion means Vortex has no " +
+        "confident answer and a human has to pick. Always scoped to the ACTIVE game — " +
+        "no gameId param, this data doesn't exist per-game the way most state here does.",
+      inputSchema: z.object({}),
+    },
+    async () => ({
+      content: [jsonText(control.listUnsolvedConflicts(api))],
+    }),
+  );
+
+  server.registerTool(
     "find_missing_deployed_files",
     {
       description:
