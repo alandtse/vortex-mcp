@@ -92,6 +92,7 @@ hand-transcribed, so it can't silently drift from the code.
 | `list_profiles`               | read   | List Vortex profiles (defaults to every game; pass gameId to filter to one), with name, active status, and mod counts — a formatted join vo… |
 | `list_mods`                   | read   | List mods for a game (defaults to the active game), with friendly names and enabled state for the active profile — a formatted join vortex_… |
 | `list_load_order`             | read   | List the current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index.                                                          |
+| `get_plugin_details`          | read   | Get the same rich per-plugin info Vortex's own Plugins tab shows — master list, LOOT messages/warnings, dirty-edit status (ITM/UDR), group,… |
 | `list_categories`             | read   | List a game's mod categories (defaults to the active game), sorted by display order, with a mod count per category — a join vortex_query ca… |
 | `list_downloads`              | read   | List the download queue/history for a game (defaults to the active game): name, state, progress percent, size, start time, installedModId —… |
 | `find_stale_downloads`        | read   | Group downloads that came from the SAME Nexus mod page (not the same field list_downloads' installedModId reads — this groups by the Nexus…  |

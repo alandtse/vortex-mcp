@@ -240,6 +240,30 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "get_plugin_details",
+    {
+      description:
+        "Get the same rich per-plugin info Vortex's own Plugins tab shows — master " +
+        "list, LOOT messages/warnings, dirty-edit status (ITM/UDR), group, version — by " +
+        "triggering the SAME real LOOT lookup the UI panel and the LOOT-sort mechanism " +
+        "both use, merged with load order (index/enabled) and the base record Vortex " +
+        "already caches (modId, deployed, isNative). list_load_order alone only gives " +
+        "you index/enabled — this is the rest of what the tab surfaces. A real, " +
+        "potentially slow LOOT call (loads the current load order, may touch the LOOT " +
+        "masterlist) — pass specific plugin names, don't request an entire large " +
+        "modlist in one go. `messages` is opaque (from the `loot` native package, not " +
+        "vendored here) — read fields as found rather than assuming a schema.",
+      inputSchema: z.object({
+        pluginNames: z.array(z.string()).min(1).describe("Plugin file names to fetch details for"),
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+      }),
+    },
+    async ({ pluginNames, gameId }) => ({
+      content: [jsonText(await control.getPluginDetails(api, pluginNames, gameId))],
+    }),
+  );
+
+  server.registerTool(
     "list_categories",
     {
       description:

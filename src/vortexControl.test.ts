@@ -65,6 +65,7 @@ import {
   findOrphanedFiles,
   findStaleDownloads,
   findStaleMods,
+  getPluginDetails,
   launchGame,
   listCategories,
   listDialogs,
@@ -508,6 +509,89 @@ describe("vortexControl: listLoadOrder", () => {
     (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({});
 
     expect(() => listLoadOrder(api)).toThrow(/No plugin load order/);
+  });
+});
+
+describe("vortexControl: getPluginDetails", () => {
+  it("merges load order, the cached base record, and the real LOOT lookup result into one summary", async () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const emit = vi.fn((name: string, ...rest: unknown[]) => {
+      if (name === "plugin-details") {
+        // Regression: plugin-details' real callback is (result) => void, a single
+        // argument -- not the (err, result?) convention CALLBACK_SENTINEL assumes.
+        const cb = rest[rest.length - 1] as (result: unknown) => void;
+        cb({
+          "foo.esp": {
+            group: "default",
+            version: "1.0",
+            messages: [{ type: "warn", text: "test" }],
+            dirtyness: [{}],
+          },
+        });
+      }
+    });
+    const api = fakeApi({ emit });
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      loadOrder: { "foo.esp": { loadOrder: 0, enabled: true } },
+      session: {
+        plugins: { pluginList: { "foo.esp": { modId: "modA", deployed: true, isNative: false } } },
+      },
+    });
+
+    const result = await getPluginDetails(api, ["foo.esp"]);
+
+    expect(result).toEqual([
+      {
+        plugin: "foo.esp",
+        index: 0,
+        enabled: true,
+        modId: "modA",
+        deployed: true,
+        isNative: false,
+        group: "default",
+        version: "1.0",
+        messages: [{ type: "warn", text: "test" }],
+        dirty: true,
+      },
+    ]);
+    expect(emit).toHaveBeenCalledWith(
+      "plugin-details",
+      "skyrimse",
+      ["foo.esp"],
+      expect.any(Function),
+    );
+  });
+
+  it("falls back to index -1 and undefined fields for a plugin missing from every source", async () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const emit = vi.fn((name: string, ...rest: unknown[]) => {
+      if (name === "plugin-details") {
+        const cb = rest[rest.length - 1] as (result: unknown) => void;
+        cb({});
+      }
+    });
+    const api = fakeApi({ emit });
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      loadOrder: { "other.esp": { loadOrder: 0, enabled: true } },
+      session: { plugins: { pluginList: {} } },
+    });
+
+    const result = await getPluginDetails(api, ["missing.esp"]);
+
+    expect(result).toEqual([
+      {
+        plugin: "missing.esp",
+        index: -1,
+        enabled: false,
+        modId: undefined,
+        deployed: undefined,
+        isNative: undefined,
+        group: undefined,
+        version: undefined,
+        messages: undefined,
+        dirty: false,
+      },
+    ]);
   });
 });
 

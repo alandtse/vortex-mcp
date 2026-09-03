@@ -920,6 +920,96 @@ export function listLoadOrder(api: IExtensionApi): LoadOrderEntry[] {
     .toSorted((a, b) => a.index - b.index);
 }
 
+export interface PluginDetail {
+  plugin: string;
+  /** -1 when the plugin has no load-order entry at all (not deployed/known). */
+  index: number;
+  enabled: boolean;
+  /** Mod id this plugin came from, when known (from session.plugins.pluginList). */
+  modId?: string;
+  deployed?: boolean;
+  /** True for a hard-coded engine plugin Vortex has no ordering influence over. */
+  isNative?: boolean;
+  /** LOOT group this plugin is assigned to, when LOOT metadata was fetched successfully. */
+  group?: string;
+  version?: string;
+  /**
+   * Raw LOOT messages (warnings/errors from the LOOT masterlist) for this plugin, when
+   * fetched successfully. Shape comes straight from the `loot` native package — this
+   * project doesn't vendor its types, so treat entries as opaque and read fields as
+   * found rather than assuming a schema.
+   */
+  messages?: unknown[];
+  /** True when LOOT reports dirty edits (ITM/UDR) for this plugin. */
+  dirty?: boolean;
+}
+
+/**
+ * Fetches the same rich per-plugin info Vortex's own Plugins tab shows — master list,
+ * LOOT messages/warnings, dirty-edit status, group, version — by triggering the SAME
+ * real LOOT lookup (event "plugin-details") the UI panel and lootSortAsync both use
+ * under the hood, then merging it with load order (index/enabled) and the base record
+ * already cached in session.plugins.pluginList (modId, deployed, isNative). NOT safely
+ * reachable via vortex_dispatch's generic CALLBACK_SENTINEL mechanism: confirmed live
+ * that "plugin-details"'s real callback signature is (result) => void — a SINGLE
+ * argument — not the (err, result?) convention that mechanism assumes; using it
+ * generically silently misinterprets the real result object as an error (surfaced as a
+ * baffling "[object Object]" failure with no other explanation). This function talks to
+ * the event directly with the correct single-argument contract instead. A real,
+ * potentially slow LOOT call (loads the current load order, may hit the LOOT masterlist)
+ * — requires explicit pluginNames, don't request an entire large modlist in one go
+ * (mirrors check_nexus_mod_updates' own unscoped-timeout lesson).
+ */
+export async function getPluginDetails(
+  api: IExtensionApi,
+  pluginNames: string[],
+  gameId?: string,
+): Promise<PluginDetail[]> {
+  const st = state(api);
+  const targetGameId = resolveGameId(gameId, st);
+  const loadOrder = listLoadOrder(api);
+  const loadOrderByPlugin = new Map(loadOrder.map((entry) => [entry.plugin.toLowerCase(), entry]));
+  const pluginList =
+    (queryStatePath(api, ["session", "plugins", "pluginList"]) as
+      | Record<string, { modId?: string; deployed?: boolean; isNative?: boolean }>
+      | undefined) ?? {};
+
+  type LootPluginInfo = {
+    messages?: unknown[];
+    dirtyness?: unknown[];
+    group?: string;
+    version?: string;
+  };
+  const lootInfo = await new Promise<Record<string, LootPluginInfo>>((resolve, reject) => {
+    try {
+      api.events.emit("plugin-details", targetGameId, pluginNames, (result: unknown) => {
+        resolve((result ?? {}) as Record<string, LootPluginInfo>);
+      });
+    } catch (err) {
+      reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  });
+
+  return pluginNames.map((plugin) => {
+    const lower = plugin.toLowerCase();
+    const lo = loadOrderByPlugin.get(lower);
+    const base = pluginList[plugin] ?? pluginList[lower];
+    const loot = lootInfo[plugin] ?? lootInfo[lower];
+    return {
+      plugin,
+      index: lo?.index ?? -1,
+      enabled: lo?.enabled ?? false,
+      modId: base?.modId,
+      deployed: base?.deployed,
+      isNative: base?.isNative,
+      group: loot?.group,
+      version: loot?.version,
+      messages: loot?.messages,
+      dirty: (loot?.dirtyness?.length ?? 0) > 0,
+    };
+  });
+}
+
 export async function setModsEnabled(
   api: IExtensionApi,
   modIds: string[],

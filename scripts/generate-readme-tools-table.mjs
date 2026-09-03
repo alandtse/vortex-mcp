@@ -26,6 +26,7 @@ const ACCESS_TIER = {
   list_profiles: "read",
   list_mods: "read",
   list_load_order: "read",
+  get_plugin_details: "read",
   list_categories: "read",
   list_downloads: "read",
   list_notifications: "read",
