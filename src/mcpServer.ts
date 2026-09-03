@@ -777,7 +777,16 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
         "vortex_describe's `listenerHints`) register a persistent listener instead of " +
         'performing a one-off action: pass "__CALLBACK__" the same way, and this returns a ' +
         "listenerId immediately rather than waiting for anything — poll what it's captured " +
-        "with poll_listener. Not allowlisted: everything in vortex_describe's `actions`/" +
+        "with poll_listener. (5) action='type:SOME_TYPE' (note the literal 'type:' prefix) " +
+        "dispatches a raw {type, payload} Redux action directly, args[0] being the WHOLE " +
+        "payload — an escape hatch for actions defined inside a game extension's own " +
+        "module (e.g. gamebryo-plugin-management's per-plugin enable toggle) that aren't " +
+        "re-exported through @nexusmods/vortex-api and so don't appear anywhere in path " +
+        "(1)'s `actions` list at all — see dispatchHints for 'type:'-prefixed entries " +
+        "this project has verified. Deliberately requires the explicit prefix rather than " +
+        "silently falling back to a raw dispatch for any unrecognized name, since most " +
+        "reducers ignore an unknown type — a typo would otherwise silently no-op instead " +
+        "of throwing a clear error. Not allowlisted: everything in vortex_describe's `actions`/" +
         "`extensionApis`/`eventNames`/`apiMethods` lists is callable this way once you hold " +
         "the write-tier token — that token, not a curated list, is the actual security " +
         "boundary, matching what a human at Vortex's own UI can already do. Use " +

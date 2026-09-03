@@ -121,6 +121,7 @@ describe("vortexControl: reflection", () => {
       "profileId: string, modId: string, enable: boolean",
     );
     expect(result.dispatchHints).not.toHaveProperty("setNextProfile");
+    expect(result.dispatchHints["type:SET_PLUGIN_ENABLED"]).toContain("pluginName");
     expect(result.extensionApis).toEqual([]);
     expect(result.extensionApiHints.nexusGetModInfo).toContain("gameId: string");
     expect(result.extensionApiHints.nexusSearchCollections).toContain("OPTIONS OBJECT");
@@ -648,6 +649,20 @@ describe("vortexControl: restart", () => {
 });
 
 describe("vortexControl: dispatchAction", () => {
+  it("dispatches a raw {type, payload} action when given a 'type:' prefix, bypassing the action-creator lookup entirely", async () => {
+    const dispatch = vi.fn();
+
+    const result = await dispatchAction(fakeApi({ dispatch }), "type:SET_PLUGIN_ENABLED", [
+      { pluginName: "Foo.esp", enabled: false },
+    ]);
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "SET_PLUGIN_ENABLED",
+      payload: { pluginName: "Foo.esp", enabled: false },
+    });
+    expect(result).toEqual({ dispatched: "SET_PLUGIN_ENABLED", raw: true });
+  });
+
   it("dispatches a named action and returns it", async () => {
     const dispatch = vi.fn();
 

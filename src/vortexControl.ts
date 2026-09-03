@@ -335,6 +335,21 @@ const SELECTOR_HINTS = new Map<string, string>([
 // action, and blocked the trusted case (an agent acting on the operator's own behalf) for
 // no real gain against an adversarial one (who'd already have full access via the token).
 const ACTION_HINTS = new Map<string, string>([
+  [
+    "type:SET_PLUGIN_ENABLED",
+    "args=[{pluginName: string, enabled: boolean}] — a SINGLE OBJECT payload (this is a " +
+      "raw type:-prefixed dispatch, not a normal action creator call: no positional " +
+      "args, args[0] IS the whole payload). Toggles ONE PLUGIN's (.esp/.esm/.esl) own " +
+      "load-order enabled flag directly — distinct from set_mods_enabled, which " +
+      "operates on mods, not individual plugins a mod may ship several of (see " +
+      "LoadOrderEntry.enabled's own doc comment). Defined inside the gamebryo-plugin-" +
+      "management extension (read from its actions/loadOrder.ts + reducers/loadOrder.ts " +
+      "source) — confirmed live this does NOT appear in vortex_describe's `actions` " +
+      "list at all, unreachable any other way through this project. Only applies to " +
+      "games using the gamebryo/LOOT plugin system (list_load_order works or throws the " +
+      "same way this does or doesn't apply). Re-check list_load_order afterward — this " +
+      "doesn't deploy or update plugins.txt itself.",
+  ],
   ["addMod", "gameId: string, mod: IMod"],
   ["addMods", "gameId: string, mods: IMod[]"],
   ["addModRule", "gameId: string, modId: string, rule: IModRule"],
@@ -619,6 +634,22 @@ export function pollListener(
  * completion rather than just firing; the small set of apiMethods in LISTENER_SPECS use
  * the same convention to register a persistent listener instead (see registerListener).
  */
+// Found live: many real, meaningful actions (e.g. gamebryo-plugin-management's
+// setPluginEnabled, the actual per-PLUGIN enable/disable toggle distinct from mod-level
+// set_mods_enabled — confirmed live it does NOT appear in vortex_describe's `actions`
+// list at all) are defined inside a game-extension's own module, not re-exported through
+// @nexusmods/vortex-api's published `actions` object — the ENTIRE surface the first
+// dispatch path below can reach. There's no api.ext/event/apiMethod path to them either.
+// This prefix is an explicit, deliberate escape hatch: dispatch a raw {type, payload}
+// Redux action by its literal type string once you already know it (read the
+// extension's own actions/*.ts and reducers/*.ts source, matching how ACTION_HINTS
+// entries prefixed with this get verified) — bypasses the "must be a published creator
+// function" requirement entirely. Deliberately NOT a silent fallback for an unrecognized
+// action name (that would turn a typo into a silent no-op instead of a clear error,
+// since most reducers just ignore an unknown type) — requires this explicit prefix so a
+// caller is unambiguously opting in, not accidentally triggering it.
+const RAW_ACTION_TYPE_PREFIX = "type:";
+
 export async function dispatchAction(
   api: IExtensionApi,
   name: string,
@@ -626,6 +657,11 @@ export async function dispatchAction(
   expectedContext?: ExpectedContext,
 ): Promise<unknown> {
   assertExpectedContext(api, expectedContext);
+  if (name.startsWith(RAW_ACTION_TYPE_PREFIX)) {
+    const rawType = name.slice(RAW_ACTION_TYPE_PREFIX.length);
+    store(api).dispatch({ type: rawType, payload: args[0] });
+    return { dispatched: rawType, raw: true };
+  }
   const fn = (actions as Record<string, unknown>)[name];
   if (typeof fn === "function") {
     const result = (fn as (...fnArgs: unknown[]) => unknown)(...args);
