@@ -62,6 +62,7 @@ import {
   findMissingMasters,
   findModByFile,
   findModDependents,
+  findOrphanedFiles,
   launchGame,
   listCategories,
   listDialogs,
@@ -1876,6 +1877,68 @@ describe("vortexControl: findMissingDeployedFiles", () => {
     });
 
     expect(await findMissingDeployedFiles(api)).toEqual([]);
+  });
+});
+
+describe("vortexControl: findOrphanedFiles", () => {
+  let gameRoot: string;
+
+  beforeEach(async () => {
+    gameRoot = await mkdtemp(path.join(os.tmpdir(), "vortex-mcp-test-orphan-"));
+    await mkdir(path.join(gameRoot, "Data"), { recursive: true });
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+  });
+
+  afterEach(async () => {
+    await rm(gameRoot, { recursive: true, force: true });
+  });
+
+  function apiWithMods(mods: Record<string, { installationPath: string }>) {
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      settings: { gameMode: { discovered: { skyrimse: { path: gameRoot } } } },
+      persistent: { mods: { skyrimse: mods } },
+    });
+    return api;
+  }
+
+  async function writeManifest(files: Array<{ relPath: string; source: string }>): Promise<void> {
+    await writeFile(
+      path.join(gameRoot, "Data", "vortex.deployment.json"),
+      JSON.stringify({ version: 1, instance: "test", files }),
+    );
+  }
+
+  it("flags a manifest-tracked file still on disk whose source mod no longer exists", async () => {
+    await writeFile(path.join(gameRoot, "Data", "Leftover.esp"), "x");
+    await writeManifest([{ relPath: "Leftover.esp", source: "Uninstalled Mod-1.0" }]);
+    const api = apiWithMods({});
+
+    expect(await findOrphanedFiles(api)).toEqual([
+      { relPath: "Leftover.esp", source: "Uninstalled Mod-1.0" },
+    ]);
+  });
+
+  it("does not flag a file whose source matches a currently-installed mod's installationPath", async () => {
+    await writeFile(path.join(gameRoot, "Data", "Current.esp"), "x");
+    await writeManifest([{ relPath: "Current.esp", source: "Current Mod-1.0" }]);
+    const api = apiWithMods({ modA: { installationPath: "Current Mod-1.0" } });
+
+    expect(await findOrphanedFiles(api)).toEqual([]);
+  });
+
+  it("does not flag a manifest entry whose file was already removed from disk", async () => {
+    // The manifest itself can be stale -- only report files genuinely still present.
+    await writeManifest([{ relPath: "AlreadyGone.esp", source: "Uninstalled Mod-1.0" }]);
+    const api = apiWithMods({});
+
+    expect(await findOrphanedFiles(api)).toEqual([]);
+  });
+
+  it("returns an empty array when no manifest exists yet (never deployed)", async () => {
+    const api = apiWithMods({});
+
+    expect(await findOrphanedFiles(api)).toEqual([]);
   });
 });
 

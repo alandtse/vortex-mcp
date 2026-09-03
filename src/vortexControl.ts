@@ -1781,6 +1781,81 @@ export async function findMissingDeployedFiles(
   return discrepancies;
 }
 
+export interface OrphanedFileMatch {
+  relPath: string;
+  /**
+   * NOT a mod id — Vortex's deployment manifest records each file's source as the
+   * owning mod's `installationPath` (staging folder name), read from Vortex's own
+   * source (mod_management/LinkingDeployment.ts's activate(): `source: sourceName`
+   * where sourceName is `mod.installationPath`) — found live that installationPath and
+   * `id` can diverge (a mod update can keep the old id while changing installationPath,
+   * or vice versa), so this can't be matched against list_mods' `id` directly.
+   */
+  source: string;
+}
+
+/**
+ * Finds files Vortex's own deployment manifest (<Data>/vortex.deployment.json — the
+ * same bookkeeping Vortex reads for its own Purge) still attributes to a mod whose
+ * installationPath no longer has a corresponding entry in persistent.mods, but that are
+ * still physically present in the Data folder. A join reflection can't do in one call:
+ * cross-references every manifest entry's source against the current mod list, then
+ * confirms the file is still really on disk (the manifest itself can be stale). This is
+ * the read-side of a real, commonly-reported Vortex complaint — uninstalling a mod
+ * sometimes leaves its .esp/texture files behind — surfaced via the same manifest Vortex
+ * itself uses, not a heuristic file-tree diff (which can't tell a leftover mod file from
+ * a legitimately manually-placed one; this can, since every Vortex-deployed file has a
+ * manifest entry). Only covers the DEFAULT mod type's manifest (vortex.deployment.json,
+ * no per-modType suffix) — a game using per-type mod deployment (e.g. separate save/ini
+ * mod types) can have additional untyped manifests this doesn't read.
+ */
+export async function findOrphanedFiles(
+  api: IExtensionApi,
+  gameId?: string,
+): Promise<OrphanedFileMatch[]> {
+  const st = state(api);
+  const targetGameId = resolveGameId(gameId, st);
+  const gamePath = queryStatePath(api, [
+    "settings",
+    "gameMode",
+    "discovered",
+    targetGameId,
+    "path",
+  ]) as string | undefined;
+  if (gamePath === undefined) {
+    throw new Error(`Game ${targetGameId} is not discovered (no installation path known).`);
+  }
+  const dataDir = path.join(gamePath, "Data");
+  const manifestPath = path.join(dataDir, "vortex.deployment.json");
+
+  let manifestFiles: Array<{ relPath: string; source: string }>;
+  try {
+    const raw = await readFile(manifestPath, "utf8");
+    manifestFiles =
+      (JSON.parse(raw) as { files?: Array<{ relPath: string; source: string }> }).files ?? [];
+  } catch {
+    // No manifest yet (never deployed) — nothing to check.
+    return [];
+  }
+
+  const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
+  const installedPaths = new Set(Object.values(mods).map((mod) => mod.installationPath));
+
+  const orphans: OrphanedFileMatch[] = [];
+  for (const file of manifestFiles) {
+    if (installedPaths.has(file.source)) {
+      continue;
+    }
+    const stillOnDisk = await stat(path.join(dataDir, file.relPath))
+      .then(() => true)
+      .catch(() => false);
+    if (stillOnDisk) {
+      orphans.push({ relPath: file.relPath, source: file.source });
+    }
+  }
+  return orphans;
+}
+
 // api.ext.* — Vortex's own built-in extension APIs (Nexus Mods integration, using the
 // user's existing Vortex login, no separate API key needed; other extensions can add
 // more). Not an allowlist — see ACTION_HINTS's comment for why (the token is the real

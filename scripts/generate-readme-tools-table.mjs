@@ -39,6 +39,7 @@ const ACCESS_TIER = {
   list_duplicate_mods: "read",
   list_known_mod_conflicts: "read",
   find_missing_deployed_files: "read",
+  find_orphaned_files: "read",
   check_nexus_mod_updates: "read",
   switch_profile: "write",
   clone_profile: "write",

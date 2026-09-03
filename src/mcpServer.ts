@@ -491,6 +491,30 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "find_orphaned_files",
+    {
+      description:
+        "Find files Vortex's own deployment manifest (<Data>/vortex.deployment.json — " +
+        "the same bookkeeping Vortex reads for its own Purge) still attributes to a mod " +
+        "that no longer has a matching entry in the current mod list, but that are still " +
+        "physically present in the Data folder — the read side of a commonly-reported " +
+        "Vortex complaint (uninstalling a mod sometimes leaves its .esp/texture files " +
+        "behind). `source` is NOT a mod id — it's the owning mod's installationPath " +
+        "(staging folder name), which can diverge from a mod's `id` across updates; " +
+        "don't try to match it against list_mods' id directly. An empty result means " +
+        "either genuinely nothing orphaned, or the game has never been deployed (no " +
+        "manifest yet) — this tool can't distinguish those. Only covers the default mod " +
+        "type's manifest.",
+      inputSchema: z.object({
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+      }),
+    },
+    async ({ gameId }) => ({
+      content: [jsonText(await control.findOrphanedFiles(api, gameId))],
+    }),
+  );
+
+  server.registerTool(
     "check_nexus_mod_updates",
     {
       description:

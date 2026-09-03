@@ -104,6 +104,7 @@ hand-transcribed, so it can't silently drift from the code.
 | `list_duplicate_mods`         | read   | Find installed mods that look like duplicates or redundant leftovers — never auto-resolved, purely informational (same 'report candidates,…  |
 | `list_known_mod_conflicts`    | read   | Surfaces real 'conflicts'-type rules Vortex already has recorded on enabled mods (mod.rules — the same field list_mod_rules reads, often po… |
 | `find_missing_deployed_files` | read   | Find plugins where Vortex's load-order state, what's actually deployed to the game's Data folder, and what the game's own plugins.txt says…  |
+| `find_orphaned_files`         | read   | Find files Vortex's own deployment manifest (<Data>/vortex.deployment.json — the same bookkeeping Vortex reads for its own Purge) still att… |
 | `check_nexus_mod_updates`     | read   | Check installed Nexus-sourced mods for available updates via Vortex's own built-in integration and the user's existing Vortex login — no se… |
 | `list_dialogs`                | read   | List Vortex's currently-open modal dialogs (e.g. a 'files changed outside Vortex' prompt that can block a deploy) — distinct from list_noti… |
 | `switch_profile`              | write  | Switch Vortex to a different profile by id (query list_profiles to find one).                                                                |
