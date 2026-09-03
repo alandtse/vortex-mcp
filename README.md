@@ -94,6 +94,7 @@ hand-transcribed, so it can't silently drift from the code.
 | `list_load_order`             | read   | List the current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index.                                                          |
 | `list_categories`             | read   | List a game's mod categories (defaults to the active game), sorted by display order, with a mod count per category — a join vortex_query ca… |
 | `list_downloads`              | read   | List the download queue/history for a game (defaults to the active game): name, state, progress percent, size, start time, installedModId —… |
+| `find_stale_downloads`        | read   | Group downloads that came from the SAME Nexus mod page (not the same field list_downloads' installedModId reads — this groups by the Nexus…  |
 | `list_notifications`          | read   | List Vortex's current notifications (errors, warnings, info) — what Vortex itself is currently flagging as a problem, useful for diagnosing… |
 | `list_mod_rules`              | read   | List a mod's dependency/conflict rules (before/after/requires/conflicts/...), resolving each reference to the target mod's friendly name wh… |
 | `find_mod_dependents`         | read   | Find every OTHER installed mod whose own rules reference this one — the reverse of list_mod_rules, which only shows rules recorded ON the m… |
@@ -102,6 +103,7 @@ hand-transcribed, so it can't silently drift from the code.
 | `find_missing_masters`        | read   | Find enabled plugins whose master files aren't themselves enabled — reads each plugin's real TES4 header from the game's Data folder (the B… |
 | `list_runtime_errors`         | read   | Read recent Papyrus error lines and crash log excerpts from the game's real save-data folder (Documents/My Games/<game>) — Vortex has no co… |
 | `list_duplicate_mods`         | read   | Find installed mods that look like duplicates or redundant leftovers — never auto-resolved, purely informational (same 'report candidates,…  |
+| `find_stale_mods`             | read   | List DISABLED mods for a profile (defaults to the active one), sorted oldest-disabled first — candidates for actually removing rather than…  |
 | `list_known_mod_conflicts`    | read   | Surfaces real 'conflicts'-type rules Vortex already has recorded on enabled mods (mod.rules — the same field list_mod_rules reads, often po… |
 | `list_unsolved_conflicts`     | read   | List file conflicts between enabled mods that have NO rule resolving them yet — the read side of Vortex's own conflict-resolution ('Set Rul… |
 | `find_missing_deployed_files` | read   | Find plugins where Vortex's load-order state, what's actually deployed to the game's Data folder, and what the game's own plugins.txt says…  |

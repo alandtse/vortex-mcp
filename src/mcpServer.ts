@@ -294,6 +294,31 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "find_stale_downloads",
+    {
+      description:
+        "Group downloads that came from the SAME Nexus mod page (not the same field " +
+        "list_downloads' installedModId reads — this groups by the Nexus page id nested " +
+        "in each download's own metadata) and report every group with more than one " +
+        "entry: multiple archives ever downloaded for one mod, typically old versions " +
+        "left behind after updating. Each entry's `installed` flags whether THAT " +
+        "download's content is currently deployed — confirmed live that MORE THAN ONE " +
+        "entry in a group can show true simultaneously (Vortex updates a mod in place " +
+        "under the same modId, so an older download can keep a stale-but-live-looking " +
+        "installed pointer even though a newer one is what's actually deployed), so " +
+        "don't assume exactly one true value. Every entry showing installed:false is a " +
+        "real candidate for manual deletion to reclaim disk space. Reports raw facts " +
+        "only, no verdict; you may have a real reason to keep an old version.",
+      inputSchema: z.object({
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+      }),
+    },
+    async ({ gameId }) => ({
+      content: [jsonText(control.findStaleDownloads(api, gameId))],
+    }),
+  );
+
+  server.registerTool(
     "list_notifications",
     {
       description:
@@ -474,6 +499,34 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "find_stale_mods",
+    {
+      description:
+        "List DISABLED mods for a profile (defaults to the active one), sorted oldest-" +
+        "disabled first — candidates for actually removing rather than leaving disabled " +
+        "forever. `disabledSince` is when the mod's enabled state was last toggled " +
+        "(despite Vortex's own field name for it, enabledTime, this is set even for " +
+        "currently-disabled mods and tracks the last flip either direction) — how long " +
+        "ago that was is the real 'how stale' signal, not the enabled flag alone. " +
+        "Reports raw facts only, no verdict: a mod can be deliberately kept disabled as " +
+        "an alternate (e.g. two versions of a texture pack for different playthroughs).",
+      inputSchema: z.object({
+        gameId: z.string().optional().describe("Game id; defaults to the active game"),
+        profileId: z.string().optional().describe("Profile id; defaults to the active profile"),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Cap the number of results, oldest-disabled first"),
+      }),
+    },
+    async ({ gameId, profileId, limit }) => ({
+      content: [jsonText(control.findStaleMods(api, { gameId, profileId, limit }))],
+    }),
+  );
+
+  server.registerTool(
     "list_known_mod_conflicts",
     {
       description:
@@ -569,24 +622,34 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
         "key. Kept as a dedicated tool (unlike get-mod-info, now folded into " +
         "vortex_query's extApi mode) because it does a real join vortex_query can't do " +
         "in one call: resolving mod ids to full IMod records and filtering to Nexus-" +
-        "sourced ones before calling the underlying api.ext function. Defaults to every " +
-        "installed mod with source 'nexus'; pass modIds to check a specific subset. " +
-        "Consumes the user's real Nexus API request quota — don't call this in a loop. " +
-        "WARNING: the no-args (check everything) form makes one real network call per " +
-        "mod through Vortex's own nexusCheckModsVersion and has been observed to exceed " +
-        "a 300s MCP call timeout on a 50+ mod list, with no partial results if it times " +
-        "out — for anything beyond a small collection, prefer passing modIds for a " +
-        "bounded, fast check (confirmed near-instant on 3 mods) rather than the full scan.",
+        "sourced ones before calling the underlying api.ext function. Makes one real, " +
+        "rate-limited network call per mod through Vortex's own nexusCheckModsVersion — " +
+        "confirmed live to exceed a 300s MCP call timeout well before covering even a " +
+        "modest (~50 mod) list, so the default (no modIds) form caps itself at `limit` " +
+        "(25) mods rather than trying everything and timing out with no partial results. " +
+        "Check the result's eligibleCount vs checkedCount: if eligibleCount is higher, " +
+        "there's more to check — pass the remaining mod ids explicitly (via modIds, no " +
+        "limit applied when you do) in a follow-up call to cover the rest in batches. " +
+        "Consumes the user's real Nexus API request quota — don't call this in a loop.",
       inputSchema: z.object({
         gameId: z.string().optional().describe("Game id; defaults to the active game"),
         modIds: z
           .array(z.string())
           .optional()
-          .describe("Vortex mod ids to check; defaults to every installed Nexus-sourced mod"),
+          .describe(
+            "Vortex mod ids to check; defaults to the first `limit` installed Nexus-" +
+              "sourced mods. No limit applied when you pass this explicitly.",
+          ),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Cap on how many mods to check when modIds is omitted; default 25"),
       }),
     },
-    async ({ gameId, modIds }) => ({
-      content: [jsonText(await control.checkNexusModUpdates(api, gameId, modIds))],
+    async ({ gameId, modIds, limit }) => ({
+      content: [jsonText(await control.checkNexusModUpdates(api, gameId, modIds, limit))],
     }),
   );
 

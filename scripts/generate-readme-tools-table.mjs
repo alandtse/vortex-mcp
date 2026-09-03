@@ -38,6 +38,8 @@ const ACCESS_TIER = {
   find_missing_masters: "read",
   list_runtime_errors: "read",
   list_duplicate_mods: "read",
+  find_stale_mods: "read",
+  find_stale_downloads: "read",
   list_known_mod_conflicts: "read",
   list_unsolved_conflicts: "read",
   find_missing_deployed_files: "read",

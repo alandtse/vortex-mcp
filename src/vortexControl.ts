@@ -1028,6 +1028,104 @@ export function listDownloads(
   return options.limit !== undefined ? summaries.slice(0, options.limit) : summaries;
 }
 
+export interface StaleDownloadEntry {
+  downloadId: string;
+  fileName: string;
+  fileVersion?: string;
+  state: string;
+  /** Found live: not populated on some older/"finished" download records. */
+  startTime?: number;
+  /**
+   * True when THIS download is the one currently installed (installed.modId set) —
+   * never treat this one as redundant regardless of how it compares to the others in
+   * its group. Found live: MORE THAN ONE entry in a group can show true simultaneously
+   * (Vortex updates a mod in place under the same modId, so an older download can still
+   * carry a stale-but-live-looking installed pointer even though a newer download is
+   * what's actually deployed — same caveat list_downloads' installedModId documents).
+   * Don't assume exactly one true value per group.
+   */
+  installed: boolean;
+}
+
+export interface StaleDownloadGroup {
+  /** The shared Nexus mod page id every entry in this group was downloaded from. */
+  nexusModId: number;
+  downloads: StaleDownloadEntry[];
+}
+
+/**
+ * Groups downloads that came from the SAME Nexus mod page (download.modInfo.nexus.
+ * ids.modId — found live, not the same field list_downloads' installedModId reads,
+ * which is a Vortex-internal id) and reports every group with more than one entry —
+ * multiple archives ever downloaded for one mod, typically across versions. A genuine
+ * join reflection can't do in one call: requires reading every download's nested
+ * modInfo, grouping by the Nexus id inside it, and filtering to actual duplicates.
+ * Marks which entry (if any) is the one currently installed; every other entry in a
+ * multi-entry group is a real candidate for manual deletion (an old/superseded archive
+ * still taking up disk space) — reports raw facts only, no verdict, matching list_
+ * duplicate_mods' stance, since a caller may have a real reason to keep an old version.
+ */
+export function findStaleDownloads(api: IExtensionApi, gameId?: string): StaleDownloadGroup[] {
+  const st = state(api);
+  const targetGameId = resolveGameId(gameId, st);
+  const files =
+    (queryStatePath(api, ["persistent", "downloads", "files"]) as
+      | Record<
+          string,
+          {
+            game?: string[];
+            localPath?: string;
+            state: string;
+            // Found live: not populated on some older/"finished" download records.
+            startTime?: number;
+            installed?: { modId?: string };
+            modInfo?: {
+              nexus?: { ids?: { modId?: number } };
+              meta?: { fileName?: string; fileVersion?: string };
+            };
+          }
+        >
+      | undefined) ?? {};
+
+  const byNexusModId = new Map<number, Array<{ id: string; download: (typeof files)[string] }>>();
+  for (const [id, download] of Object.entries(files)) {
+    if (!(download.game ?? []).includes(targetGameId)) {
+      continue;
+    }
+    const nexusModId = download.modInfo?.nexus?.ids?.modId;
+    if (nexusModId === undefined) {
+      continue;
+    }
+    const list = byNexusModId.get(nexusModId) ?? [];
+    list.push({ id, download });
+    byNexusModId.set(nexusModId, list);
+  }
+
+  const groups: StaleDownloadGroup[] = [];
+  for (const [nexusModId, entries] of byNexusModId) {
+    if (entries.length < 2) {
+      continue;
+    }
+    groups.push({
+      nexusModId,
+      // Found live: startTime is missing on some older/"finished" download records, not
+      // just theoretically possible — fall back to 0 so the sort stays well-defined
+      // instead of comparing against NaN.
+      downloads: entries
+        .toSorted((a, b) => (b.download.startTime ?? 0) - (a.download.startTime ?? 0))
+        .map(({ id, download }) => ({
+          downloadId: id,
+          fileName: download.localPath ?? download.modInfo?.meta?.fileName ?? id,
+          fileVersion: download.modInfo?.meta?.fileVersion,
+          state: download.state,
+          startTime: download.startTime,
+          installed: download.installed?.modId !== undefined,
+        })),
+    });
+  }
+  return groups.toSorted((a, b) => a.nexusModId - b.nexusModId);
+}
+
 export interface NotificationSummary {
   id?: string;
   type: string;
@@ -1711,6 +1809,70 @@ export async function listDuplicateMods(
   return groups;
 }
 
+export interface StaleModCandidate {
+  modId: string;
+  modName: string;
+  /**
+   * Epoch ms this mod's enabled state was last toggled — found live: profile.modState
+   * carries this even for currently-disabled mods, tracking the last flip either
+   * direction, not just "last enabled." How long ago this was is the actual "how stale"
+   * signal; a mod disabled the same day it was installed and a mod disabled two years
+   * ago look identical in every other respect.
+   */
+  disabledSince: number;
+  /** ISO timestamp this mod was originally installed, when known. */
+  installTime?: string;
+}
+
+/**
+ * Lists DISABLED mods for a profile (defaults to the active one), sorted oldest-
+ * disabled first — candidates for actually removing rather than leaving disabled
+ * forever. A genuine join reflection can't do in one call: the enabled flag lives on
+ * profile.modState, the "how long has it been disabled" timestamp lives on that same
+ * modState entry (enabledTime, despite the name — found live), and the mod's own
+ * name/install date live on the separate persistent.mods record. Reports raw facts
+ * only, no verdict — a disabled-since timestamp doesn't tell you WHY it's disabled
+ * (some mods are deliberately kept disabled as alternates, e.g. two versions of a
+ * texture pack for different playthroughs).
+ */
+export function findStaleMods(
+  api: IExtensionApi,
+  options: { gameId?: string; profileId?: string; limit?: number } = {},
+): StaleModCandidate[] {
+  const st = state(api);
+  const targetGameId = resolveGameId(options.gameId, st);
+  const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
+  const profile =
+    options.profileId !== undefined
+      ? (selectors.profiles(st)[options.profileId] as IProfile | undefined)
+      : (selectors.activeProfile(st) as IProfile | undefined);
+  if (profile === undefined) {
+    throw new Error(
+      options.profileId !== undefined
+        ? `Unknown profile: ${options.profileId}`
+        : "No active profile and no profileId provided",
+    );
+  }
+
+  const candidates: StaleModCandidate[] = [];
+  for (const [modId, s] of Object.entries(
+    profile.modState as unknown as Record<string, { enabled?: boolean; enabledTime?: number }>,
+  )) {
+    const mod = mods[modId];
+    if (s.enabled === true || mod === undefined) {
+      continue;
+    }
+    candidates.push({
+      modId,
+      modName: util.renderModName(mod),
+      disabledSince: s.enabledTime ?? 0,
+      installTime: (mod.attributes as { installTime?: string } | undefined)?.installTime,
+    });
+  }
+  candidates.sort((a, b) => a.disabledSince - b.disabledSince);
+  return options.limit !== undefined ? candidates.slice(0, options.limit) : candidates;
+}
+
 export interface KnownModConflictMatch {
   modId: string;
   modName: string;
@@ -2119,32 +2281,52 @@ export interface ModUpdateCheckResult {
   checkedCount: number;
   /** Vortex-internal mod ids that have an update available on Nexus. */
   updatedModIds: string[];
+  /**
+   * How many Nexus-sourced mods were eligible to check in total (before `limit` capped
+   * it). checkedCount < eligibleCount means there's more to check — pass modIds
+   * explicitly (the ones not yet checked) to cover the rest in a follow-up call.
+   */
+  eligibleCount: number;
 }
+
+// Found live: the default (no modIds) form makes one real, rate-limited Nexus API call
+// per mod through Vortex's own nexusCheckModsVersion, and reliably exceeds a 300s MCP
+// call timeout well before covering a real modlist — confirmed even at 58 mods, not just
+// on a huge one. There's no way to make the underlying per-mod API calls faster from
+// here, so the fix is capping what one call attempts by default rather than letting the
+// caller discover the timeout the hard way; DEFAULT_UPDATE_CHECK_LIMIT keeps the default
+// (unscoped) form inside a safe, near-instant budget, matching the "confirmed near-
+// instant on 3 mods" case already documented on the tool description.
+const DEFAULT_UPDATE_CHECK_LIMIT = 25;
 
 /**
  * Checks installed Nexus-sourced mods for available updates via Vortex's own built-in
  * integration and the user's existing Vortex login — no separate API key. Defaults to
- * every installed mod with source "nexus"; pass modIds to check a specific subset.
- * Consumes the user's real Nexus API request quota — don't call this in a loop.
+ * the first `limit` (25) installed mods with source "nexus"; pass modIds to check a
+ * specific subset instead (no limit applied when modIds is given explicitly — the
+ * caller already knows exactly what they're asking for). Consumes the user's real Nexus
+ * API request quota — don't call this in a loop.
  */
 export async function checkNexusModUpdates(
   api: IExtensionApi,
   gameId?: string,
   modIds?: string[],
+  limit: number = DEFAULT_UPDATE_CHECK_LIMIT,
 ): Promise<ModUpdateCheckResult> {
   const st = state(api);
   const targetGameId = resolveGameId(gameId, st);
   const mods: { [id: string]: IMod } = st.persistent.mods[targetGameId] ?? {};
-  const targetMods = (modIds ?? Object.keys(mods))
-    .map((id) => mods[id])
-    .filter(
-      (mod): mod is IMod =>
-        mod !== undefined &&
-        (mod.attributes as { source?: string } | undefined)?.source === "nexus",
+  const eligibleIds = (modIds ?? Object.keys(mods)).filter((id) => {
+    const mod = mods[id];
+    return (
+      mod !== undefined && (mod.attributes as { source?: string } | undefined)?.source === "nexus"
     );
+  });
+  const cappedIds = modIds !== undefined ? eligibleIds : eligibleIds.slice(0, limit);
+  const targetMods = cappedIds.map((id) => mods[id]);
   const fn = getExtensionApi<
     (gameId: string, mods: IMod[], forceFull?: boolean) => Promise<string[]>
   >(api, "nexusCheckModsVersion");
   const updatedModIds = await fn(targetGameId, targetMods, false);
-  return { checkedCount: targetMods.length, updatedModIds };
+  return { checkedCount: targetMods.length, updatedModIds, eligibleCount: eligibleIds.length };
 }

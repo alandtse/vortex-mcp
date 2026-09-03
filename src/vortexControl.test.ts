@@ -63,6 +63,8 @@ import {
   findModByFile,
   findModDependents,
   findOrphanedFiles,
+  findStaleDownloads,
+  findStaleMods,
   launchGame,
   listCategories,
   listDialogs,
@@ -2173,6 +2175,246 @@ describe("vortexControl: checkNexusModUpdates", () => {
       [expect.objectContaining({ id: "modA" })],
       false,
     );
-    expect(result).toEqual({ checkedCount: 1, updatedModIds: ["modA"] });
+    expect(result).toEqual({ checkedCount: 1, updatedModIds: ["modA"], eligibleCount: 1 });
+  });
+
+  it("caps the default (no modIds) form at `limit`, reporting the true eligible count", async () => {
+    // Regression test: the unscoped form was found live to reliably exceed a 300s MCP
+    // call timeout even on a modest modlist -- the fix caps what it attempts by default
+    // instead of letting the caller discover the timeout.
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const nexusCheckModsVersion = vi.fn(
+      async (_gameId: string, _mods: unknown[], _forceFull: boolean) => [] as string[],
+    );
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: {
+            modA: { id: "modA", attributes: { source: "nexus" } },
+            modB: { id: "modB", attributes: { source: "nexus" } },
+            modC: { id: "modC", attributes: { source: "nexus" } },
+          },
+        },
+      },
+    });
+    (api as unknown as { ext: Record<string, unknown> }).ext = { nexusCheckModsVersion };
+
+    const result = await checkNexusModUpdates(api, undefined, undefined, 2);
+
+    expect(nexusCheckModsVersion.mock.calls[0][1]).toHaveLength(2);
+    expect(result).toEqual({ checkedCount: 2, updatedModIds: [], eligibleCount: 3 });
+  });
+
+  it("applies no limit when modIds is given explicitly", async () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const nexusCheckModsVersion = vi.fn(
+      async (_gameId: string, _mods: unknown[], _forceFull: boolean) => [] as string[],
+    );
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: {
+            modA: { id: "modA", attributes: { source: "nexus" } },
+            modB: { id: "modB", attributes: { source: "nexus" } },
+            modC: { id: "modC", attributes: { source: "nexus" } },
+          },
+        },
+      },
+    });
+    (api as unknown as { ext: Record<string, unknown> }).ext = { nexusCheckModsVersion };
+
+    const result = await checkNexusModUpdates(api, undefined, ["modA", "modB", "modC"], 2);
+
+    expect(nexusCheckModsVersion.mock.calls[0][1]).toHaveLength(3);
+    expect(result.checkedCount).toBe(3);
+  });
+});
+
+describe("vortexControl: findStaleDownloads", () => {
+  it("groups downloads sharing the same Nexus mod id, flagging the installed one", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        downloads: {
+          files: {
+            dOld: {
+              game: ["skyrimse"],
+              localPath: "Cool Mod v1.zip",
+              state: "finished",
+              startTime: 100,
+              modInfo: { nexus: { ids: { modId: 42 } }, meta: { fileVersion: "1.0" } },
+            },
+            dNew: {
+              game: ["skyrimse"],
+              localPath: "Cool Mod v2.zip",
+              state: "finished",
+              startTime: 200,
+              installed: { modId: "Cool Mod-42-2-0" },
+              modInfo: { nexus: { ids: { modId: 42 } }, meta: { fileVersion: "2.0" } },
+            },
+            dUnrelated: {
+              game: ["skyrimse"],
+              localPath: "Other Mod.zip",
+              state: "finished",
+              startTime: 50,
+              modInfo: { nexus: { ids: { modId: 99 } }, meta: { fileVersion: "1.0" } },
+            },
+          },
+        },
+      },
+    });
+
+    const result = findStaleDownloads(api);
+
+    expect(result).toEqual([
+      {
+        nexusModId: 42,
+        downloads: [
+          {
+            downloadId: "dNew",
+            fileName: "Cool Mod v2.zip",
+            fileVersion: "2.0",
+            state: "finished",
+            startTime: 200,
+            installed: true,
+          },
+          {
+            downloadId: "dOld",
+            fileName: "Cool Mod v1.zip",
+            fileVersion: "1.0",
+            state: "finished",
+            startTime: 100,
+            installed: false,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("omits downloads with only one entry for their Nexus mod id", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        downloads: {
+          files: {
+            d1: {
+              game: ["skyrimse"],
+              state: "finished",
+              startTime: 100,
+              modInfo: { nexus: { ids: { modId: 1 } } },
+            },
+          },
+        },
+      },
+    });
+
+    expect(findStaleDownloads(api)).toEqual([]);
+  });
+
+  it("ignores downloads for a different game", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        downloads: {
+          files: {
+            d1: {
+              game: ["fallout4"],
+              state: "finished",
+              startTime: 100,
+              modInfo: { nexus: { ids: { modId: 1 } } },
+            },
+            d2: {
+              game: ["fallout4"],
+              state: "finished",
+              startTime: 200,
+              modInfo: { nexus: { ids: { modId: 1 } } },
+            },
+          },
+        },
+      },
+    });
+
+    expect(findStaleDownloads(api)).toEqual([]);
+  });
+});
+
+describe("vortexControl: findStaleMods", () => {
+  it("lists disabled mods sorted oldest-disabled first, with install time when known", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    vi.mocked(selectors.activeProfile).mockReturnValue({
+      gameId: "skyrimse",
+      modState: {
+        modA: { enabled: false, enabledTime: 300 },
+        modB: { enabled: false, enabledTime: 100 },
+        modC: { enabled: true, enabledTime: 500 },
+      },
+    } as never);
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: {
+            modA: { id: "modA", type: "", installationPath: "", attributes: {} },
+            modB: {
+              id: "modB",
+              type: "",
+              installationPath: "",
+              attributes: { installTime: "2020-01-01T00:00:00.000Z" },
+            },
+            modC: { id: "modC", type: "", installationPath: "" },
+          },
+        },
+      },
+    });
+
+    expect(findStaleMods(api)).toEqual([
+      {
+        modId: "modB",
+        modName: "modB",
+        disabledSince: 100,
+        installTime: "2020-01-01T00:00:00.000Z",
+      },
+      { modId: "modA", modName: "modA", disabledSince: 300, installTime: undefined },
+    ]);
+  });
+
+  it("throws for an unknown explicit profileId", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    vi.mocked(selectors.profiles).mockReturnValue({});
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: { mods: { skyrimse: {} } },
+    });
+
+    expect(() => findStaleMods(api, { profileId: "missing" })).toThrow(/Unknown profile/);
+  });
+
+  it("respects limit", () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    vi.mocked(selectors.activeProfile).mockReturnValue({
+      gameId: "skyrimse",
+      modState: {
+        modA: { enabled: false, enabledTime: 100 },
+        modB: { enabled: false, enabledTime: 200 },
+      },
+    } as never);
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: {
+            modA: { id: "modA", type: "", installationPath: "" },
+            modB: { id: "modB", type: "", installationPath: "" },
+          },
+        },
+      },
+    });
+
+    expect(findStaleMods(api, { limit: 1 })).toHaveLength(1);
   });
 });
