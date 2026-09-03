@@ -169,9 +169,12 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
         "indexed) it came from in the original creator — e.g. {pluginName: 0, enabled: " +
         "1} means dispatch with args=[{pluginName: <value>, enabled: <value>}]. " +
         "`passthroughPayload: true` means the payload IS the single argument directly — " +
-        "dispatch with args=[<value>] (no wrapping object). Both empty means the type " +
-        "string was recovered but its shape wasn't recognized — still more than nothing, " +
-        "but verify the shape yourself before dispatching. Cached after the first call " +
+        "dispatch with args=[<value>] (no wrapping object). `noPayload: true` means the " +
+        "action creator takes no argument at all — dispatch with args=[] (this is a " +
+        "CONFIRMED shape, not an unknown one). When payloadKeys is empty and both flags " +
+        "are false, the type string was recovered but its shape wasn't recognized — " +
+        "still more than nothing, but verify the shape yourself before dispatching. " +
+        "Cached after the first call " +
         "(these files only change when Vortex/an extension updates) — pass forceRefresh " +
         "to re-scan after an update. A real filesystem scan across every installed " +
         "extension, not instant, but a one-time cost per process lifetime.",

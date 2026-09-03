@@ -778,6 +778,7 @@ describe("vortexControl: scanExtensionActions", () => {
         extension: "gamebryo-plugin-management",
         payloadKeys: { pluginName: 0, enabled: 1 },
         passthroughPayload: false,
+        noPayload: false,
       },
     ]);
   });
@@ -797,6 +798,7 @@ describe("vortexControl: scanExtensionActions", () => {
         extension: "some-ext",
         payloadKeys: {},
         passthroughPayload: true,
+        noPayload: false,
       },
     ]);
   });
@@ -811,7 +813,35 @@ describe("vortexControl: scanExtensionActions", () => {
     const result = await scanExtensionActions(fakeApi(), true);
 
     expect(result).toEqual([
-      { type: "SOME_TYPE", extension: "weird-ext", payloadKeys: {}, passthroughPayload: false },
+      {
+        type: "SOME_TYPE",
+        extension: "weird-ext",
+        payloadKeys: {},
+        passthroughPayload: false,
+        noPayload: false,
+      },
+    ]);
+  });
+
+  it("recognizes a no-argument creator (createAction(TYPE) with no second arg) as a CONFIRMED no-payload shape, not an unrecognized one", async () => {
+    // Found live: 3 of gamebryo-plugin-management's 26 actions use this form
+    // (CLEAR_USERLIST, CLOSE_PLUGIN_RULE_DIALOG, CLEAR_NEW_PLUGIN_COUNTER).
+    await writeExtensionBundle(
+      bundledRoot,
+      "some-ext",
+      "x=(0,g.createAction)(`CLOSE_PLUGIN_RULE_DIALOG`);",
+    );
+
+    const result = await scanExtensionActions(fakeApi(), true);
+
+    expect(result).toEqual([
+      {
+        type: "CLOSE_PLUGIN_RULE_DIALOG",
+        extension: "some-ext",
+        payloadKeys: {},
+        passthroughPayload: false,
+        noPayload: true,
+      },
     ]);
   });
 

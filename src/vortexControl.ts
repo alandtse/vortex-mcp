@@ -650,16 +650,15 @@ export function pollListener(
 // caller is unambiguously opting in, not accidentally triggering it.
 const RAW_ACTION_TYPE_PREFIX = "type:";
 
-export interface DiscoveredAction {
-  /** The literal Redux action type string — use with vortex_dispatch as action="type:<this>". */
-  type: string;
+export interface PayloadShape {
   /**
    * Best-effort recovered payload shape: maps each payload object key to the positional
    * index of the creator's own argument it comes from, e.g. {pluginName: 0, enabled: 1}
    * for a creator declared `(pluginName, enabled) => ({pluginName, enabled})`. Empty when
-   * `passthroughPayload` is true, or when the creator's shape didn't match a recognized
-   * pattern (still report the type string alone in that case — a bare type with unknown
-   * shape is still more than nothing).
+   * `passthroughPayload`/`noPayload` is true, or when the creator's shape didn't match a
+   * recognized pattern (still report the type string alone in that case — a bare type
+   * with unknown shape is still more than nothing, and callers can tell the two apart
+   * from `noPayload`/`passthroughPayload` both being false).
    */
   payloadKeys: Record<string, number>;
   /**
@@ -669,6 +668,19 @@ export interface DiscoveredAction {
    * treats args[0] as the whole payload.
    */
   passthroughPayload: boolean;
+  /**
+   * True when createAction was called with no second argument at all (redux-act's
+   * no-payload form, e.g. `createAction('CLEAR_USERLIST')`) — a fully CONFIRMED shape,
+   * not an unrecognized one: dispatch with args=[] (no payload). Distinct from both
+   * `payloadKeys` being empty for an unrecognized shape and from `passthroughPayload`
+   * (which still takes one real argument).
+   */
+  noPayload: boolean;
+}
+
+export interface DiscoveredAction extends PayloadShape {
+  /** The literal Redux action type string — use with vortex_dispatch as action="type:<this>". */
+  type: string;
   /** Extension directory name this was found in — provenance only, not guaranteed stable across Vortex releases. */
   extension: string;
 }
@@ -764,11 +776,19 @@ function splitTopLevel(text: string): string[] {
 
 const QUOTED_STRING = /^(["'`])((?:\\.|(?!\1).)*)\1$/;
 
-/** Recovers {payloadKeys, passthroughPayload} from a prepare-function's source text, when its shape matches a recognized pattern. Unrecognized shapes return both empty/false — still leaves the type string itself usable. */
-function parsePrepareFnShape(fnText: string): {
-  payloadKeys: Record<string, number>;
-  passthroughPayload: boolean;
-} {
+const NO_PAYLOAD_SHAPE: PayloadShape = {
+  payloadKeys: {},
+  passthroughPayload: false,
+  noPayload: true,
+};
+const UNRECOGNIZED_SHAPE: PayloadShape = {
+  payloadKeys: {},
+  passthroughPayload: false,
+  noPayload: false,
+};
+
+/** Recovers a PayloadShape from a prepare-function's source text, when its shape matches a recognized pattern. An unrecognized shape returns UNRECOGNIZED_SHAPE — still leaves the type string itself usable. */
+function parsePrepareFnShape(fnText: string): PayloadShape {
   // (a,b,...) => ({key: a, other: b, ...})  OR  a => ({key: a})
   const arrowMatch = /^\(?([^)=]*)\)?\s*=>\s*\(\{([\s\S]*)\}\)\s*$/.exec(fnText);
   if (arrowMatch) {
@@ -792,14 +812,14 @@ function parsePrepareFnShape(fnText: string): {
         payloadKeys[key] = idx;
       }
     }
-    return { payloadKeys, passthroughPayload: false };
+    return { payloadKeys, passthroughPayload: false, noPayload: false };
   }
   // bare single-identifier passthrough: a => a  (payload IS that one argument)
   const passthroughMatch = /^\(?([a-zA-Z_$][\w$]*)\)?\s*=>\s*\1\s*$/.exec(fnText);
   if (passthroughMatch) {
-    return { payloadKeys: {}, passthroughPayload: true };
+    return { payloadKeys: {}, passthroughPayload: true, noPayload: false };
   }
-  return { payloadKeys: {}, passthroughPayload: false };
+  return UNRECOGNIZED_SHAPE;
 }
 
 function scanFileForActions(text: string, extensionName: string): DiscoveredAction[] {
@@ -838,10 +858,7 @@ function scanFileForActions(text: string, extensionName: string): DiscoveredActi
       continue;
     }
     seenTypes.add(type);
-    const shape =
-      prepareArg !== undefined
-        ? parsePrepareFnShape(prepareArg)
-        : { payloadKeys: {}, passthroughPayload: false };
+    const shape = prepareArg !== undefined ? parsePrepareFnShape(prepareArg) : NO_PAYLOAD_SHAPE;
     results.push({ type, extension: extensionName, ...shape });
   }
   return results;
