@@ -823,6 +823,29 @@ describe("vortexControl: scanExtensionActions", () => {
     ]);
   });
 
+  it("recovers the object-literal shape from a null-guarded ternary prepare-fn", async () => {
+    // The exact byte sequence confirmed live in mod-dependency-manager/index.cjs
+    // (SET_EDIT_MOD_CYCLE) -- the only one of 85 real actions this project's scanner
+    // couldn't classify before this test was added.
+    await writeExtensionBundle(
+      bundledRoot,
+      "mod-dependency-manager",
+      "x=(0,_.createAction)(`SET_EDIT_MOD_CYCLE`,(e,t)=>e===void 0?void 0:{gameId:e,modIds:t});",
+    );
+
+    const result = await scanExtensionActions(fakeApi(), true);
+
+    expect(result).toEqual([
+      {
+        type: "SET_EDIT_MOD_CYCLE",
+        extension: "mod-dependency-manager",
+        payloadKeys: { gameId: 0, modIds: 1 },
+        passthroughPayload: false,
+        noPayload: false,
+      },
+    ]);
+  });
+
   it("recognizes a no-argument creator (createAction(TYPE) with no second arg) as a CONFIRMED no-payload shape, not an unrecognized one", async () => {
     // Found live: 3 of gamebryo-plugin-management's 26 actions use this form
     // (CLEAR_USERLIST, CLOSE_PLUGIN_RULE_DIALOG, CLEAR_NEW_PLUGIN_COUNTER).

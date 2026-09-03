@@ -788,35 +788,66 @@ const UNRECOGNIZED_SHAPE: PayloadShape = {
 };
 
 /** Recovers a PayloadShape from a prepare-function's source text, when its shape matches a recognized pattern. An unrecognized shape returns UNRECOGNIZED_SHAPE — still leaves the type string itself usable. */
-function parsePrepareFnShape(fnText: string): PayloadShape {
-  // (a,b,...) => ({key: a, other: b, ...})  OR  a => ({key: a})
-  const arrowMatch = /^\(?([^)=]*)\)?\s*=>\s*\(\{([\s\S]*)\}\)\s*$/.exec(fnText);
-  if (arrowMatch) {
-    const params = splitTopLevel(arrowMatch[1]).filter((p) => p.length > 0);
-    const paramIndex = new Map(params.map((p, idx) => [p, idx]));
-    const payloadKeys: Record<string, number> = {};
-    for (const entry of splitTopLevel(arrowMatch[2])) {
-      const colonIdx = entry.indexOf(":");
-      if (colonIdx === -1) {
-        // shorthand { key } -- key and value are the same identifier
-        const idx = paramIndex.get(entry.trim());
-        if (idx !== undefined) {
-          payloadKeys[entry.trim()] = idx;
-        }
-        continue;
-      }
-      const key = entry.slice(0, colonIdx).trim();
-      const value = entry.slice(colonIdx + 1).trim();
-      const idx = paramIndex.get(value);
+// Extracts {key: paramIndex} from an object literal's inner text (no surrounding braces),
+// resolving each entry's value against the creator's own parameter list. Shared by both
+// the direct-return and null-guarded-ternary shapes in parsePrepareFnShape below.
+function extractPayloadKeysFromObjectBody(
+  objectBody: string,
+  paramIndex: Map<string, number>,
+): Record<string, number> {
+  const payloadKeys: Record<string, number> = {};
+  for (const entry of splitTopLevel(objectBody)) {
+    const colonIdx = entry.indexOf(":");
+    if (colonIdx === -1) {
+      // shorthand { key } -- key and value are the same identifier
+      const idx = paramIndex.get(entry.trim());
       if (idx !== undefined) {
-        payloadKeys[key] = idx;
+        payloadKeys[entry.trim()] = idx;
       }
+      continue;
     }
-    return { payloadKeys, passthroughPayload: false, noPayload: false };
+    const key = entry.slice(0, colonIdx).trim();
+    const value = entry.slice(colonIdx + 1).trim();
+    const idx = paramIndex.get(value);
+    if (idx !== undefined) {
+      payloadKeys[key] = idx;
+    }
+  }
+  return payloadKeys;
+}
+
+function parsePrepareFnShape(fnText: string): PayloadShape {
+  const arrowSplit = /^\(?([^)=]*)\)?\s*=>\s*([\s\S]*)$/.exec(fnText);
+  if (arrowSplit === null) {
+    return UNRECOGNIZED_SHAPE;
+  }
+  const params = splitTopLevel(arrowSplit[1]).filter((p) => p.length > 0);
+  const paramIndex = new Map(params.map((p, idx) => [p, idx]));
+  let body = arrowSplit[2].trim();
+
+  // Strip a `guard === void 0 ? void 0 : <rest>` null-check wrapper before matching the
+  // object-literal case below -- found live (SET_EDIT_MOD_CYCLE): the real recoverable
+  // shape is the ternary's else-branch, the guard just means the creator also tolerates
+  // being called with its first argument undefined (there's nothing meaningful to record
+  // about that in PayloadShape; the else-branch shape is what matters for a real call).
+  const guardMatch = /^[a-zA-Z_$][\w$]*\s*===\s*void 0\s*\?\s*void 0\s*:\s*([\s\S]*)$/.exec(body);
+  if (guardMatch) {
+    body = guardMatch[1].trim();
+  }
+
+  // ({key: a, other: b, ...}) for a direct arrow return (parens required by JS there),
+  // or {key: a, ...} with no parens, which is what's left after stripping a ternary
+  // guard above (a ternary branch doesn't need parens to disambiguate an object literal).
+  const objectMatch = /^\(?\{([\s\S]*)\}\)?$/.exec(body);
+  if (objectMatch) {
+    return {
+      payloadKeys: extractPayloadKeysFromObjectBody(objectMatch[1], paramIndex),
+      passthroughPayload: false,
+      noPayload: false,
+    };
   }
   // bare single-identifier passthrough: a => a  (payload IS that one argument)
-  const passthroughMatch = /^\(?([a-zA-Z_$][\w$]*)\)?\s*=>\s*\1\s*$/.exec(fnText);
-  if (passthroughMatch) {
+  if (params.length === 1 && body === params[0]) {
     return { payloadKeys: {}, passthroughPayload: true, noPayload: false };
   }
   return UNRECOGNIZED_SHAPE;
