@@ -208,6 +208,35 @@ describe("vortexControl: profiles", () => {
     expect(dispatch).toHaveBeenCalled();
   });
 
+  it("switchProfile throws instead of dispatching when expectedActiveProfileId no longer matches", () => {
+    // Regression test for a real cold-run incident: the active profile silently reverted
+    // mid-analysis (Vortex's own UI, another agent, anything) with zero signal from any
+    // read tool. A caller that captured the active profile earlier can assert it's still
+    // true right before a write instead of silently acting on a stale assumption.
+    vi.mocked(selectors.profiles).mockReturnValue({
+      p1: { id: "p1", name: "First", gameId: "skyrimse", modState: {}, lastActivated: 0 },
+    });
+    vi.mocked(selectors.activeProfileId).mockReturnValue("someOtherProfile");
+    const dispatch = vi.fn();
+
+    expect(() =>
+      switchProfile(fakeApi({ dispatch }), "p1", { activeProfileId: "expectedProfile" }),
+    ).toThrow(/Active profile changed/);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("switchProfile proceeds when expectedActiveProfileId matches", () => {
+    vi.mocked(selectors.profiles).mockReturnValue({
+      p1: { id: "p1", name: "First", gameId: "skyrimse", modState: {}, lastActivated: 0 },
+    });
+    vi.mocked(selectors.activeProfileId).mockReturnValue("currentProfile");
+    const dispatch = vi.fn();
+
+    switchProfile(fakeApi({ dispatch }), "p1", { activeProfileId: "currentProfile" });
+
+    expect(dispatch).toHaveBeenCalled();
+  });
+
   it("cloneProfile rejects an unknown source profile without touching disk", async () => {
     vi.mocked(selectors.profiles).mockReturnValue({});
 
@@ -439,6 +468,18 @@ describe("vortexControl: mods", () => {
 
     await expect(setModsEnabled(fakeApi(), ["modA"], true)).rejects.toThrow(/No active profile/);
   });
+
+  it("setModsEnabled rejects when expectedActiveProfileId no longer matches, without calling the action", async () => {
+    vi.mocked(selectors.activeProfileId).mockReturnValue("someOtherProfile");
+    vi.mocked(actions.setModsEnabled).mockClear();
+
+    await expect(
+      setModsEnabled(fakeApi(), ["modA"], true, "p-explicit", {
+        activeProfileId: "expectedProfile",
+      }),
+    ).rejects.toThrow(/Active profile changed/);
+    expect(actions.setModsEnabled).not.toHaveBeenCalled();
+  });
 });
 
 describe("vortexControl: listLoadOrder", () => {
@@ -568,6 +609,18 @@ describe("vortexControl: games", () => {
     });
 
     await expect(launchGame(api, "skyrimse")).rejects.toThrow(/not in discovered tools/);
+  });
+
+  it("launchGame rejects when expectedActiveGameId no longer matches, without touching runExecutable", async () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("someOtherGame");
+    const api = fakeApi();
+    const runExecutable = vi.fn(async () => undefined);
+    (api as unknown as { runExecutable: typeof runExecutable }).runExecutable = runExecutable;
+
+    await expect(launchGame(api, "skyrimse", { activeGameId: "expectedGame" })).rejects.toThrow(
+      /Active game changed/,
+    );
+    expect(runExecutable).not.toHaveBeenCalled();
   });
 });
 
@@ -779,6 +832,30 @@ describe("vortexControl: dispatchAction", () => {
       actionKey: "Ignore",
     });
     expect(result).toEqual({ dispatched: "closeDialog", thunk: true });
+  });
+
+  it("rejects when expectedActiveProfileId no longer matches, without dispatching anything", async () => {
+    vi.mocked(selectors.activeProfileId).mockReturnValue("someOtherProfile");
+    const dispatch = vi.fn();
+
+    await expect(
+      dispatchAction(fakeApi({ dispatch }), "setLoadOrder", [["modA"]], {
+        activeProfileId: "expectedProfile",
+      }),
+    ).rejects.toThrow(/Active profile changed/);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("rejects when expectedActiveGameId no longer matches, without dispatching anything", async () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("someOtherGame");
+    const dispatch = vi.fn();
+
+    await expect(
+      dispatchAction(fakeApi({ dispatch }), "setLoadOrder", [["modA"]], {
+        activeGameId: "expectedGame",
+      }),
+    ).rejects.toThrow(/Active game changed/);
+    expect(dispatch).not.toHaveBeenCalled();
   });
 });
 

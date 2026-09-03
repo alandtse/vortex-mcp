@@ -112,6 +112,57 @@ function resolveGameId(gameId: string | undefined, st: types.IState): string {
   return targetGameId;
 }
 
+export interface ExpectedContext {
+  /** Throw unless this is still the active profile id. */
+  activeProfileId?: string;
+  /** Throw unless this is still the active game id. */
+  activeGameId?: string;
+}
+
+/**
+ * Guards a write against acting on a silently-changed context. Found live (a real
+ * cold-run incident, not a hypothetical): switching to a 1000+ mod profile, then doing
+ * ~20 minutes of read-only analysis assuming it stayed active, only to discover the
+ * active profile had reverted to a completely different one partway through — with zero
+ * error, zero notification, from any of this project's tools. Vortex's own log showed a
+ * plain "profile change" entry with no record of what triggered it (the user's own UI, a
+ * health-check side effect, anything) — this project's tools can't distinguish "I caused
+ * this" from "something else did" and shouldn't try to. What they CAN do is let a caller
+ * who captured activeProfileId/activeGameId earlier assert it's still true immediately
+ * before a write, so a stale assumption fails loudly instead of silently mutating the
+ * wrong profile/game. Both fields are optional and independent; omit either to skip that
+ * check. This is opt-in, not a default gate — a caller that never captured the context
+ * (or doesn't care) pays no cost and gets no protection, same tradeoff this project's
+ * reflection-first tools always make.
+ */
+function assertExpectedContext(api: IExtensionApi, expected: ExpectedContext | undefined): void {
+  if (expected === undefined) {
+    return;
+  }
+  const st = state(api);
+  if (expected.activeProfileId !== undefined) {
+    const actual = selectors.activeProfileId(st) as string | undefined;
+    if (actual !== expected.activeProfileId) {
+      throw new Error(
+        `Active profile changed since you last checked: expected "${expected.activeProfileId}" ` +
+          `but "${actual ?? "(none)"}" is active now — something else (the user's own Vortex ` +
+          "UI, another agent, a health check) switched it. Re-verify with list_profiles before " +
+          "retrying; don't assume your original target is still correct.",
+      );
+    }
+  }
+  if (expected.activeGameId !== undefined) {
+    const actual = selectors.activeGameId(st) as string | undefined;
+    if (actual !== expected.activeGameId) {
+      throw new Error(
+        `Active game changed since you last checked: expected "${expected.activeGameId}" but ` +
+          `"${actual ?? "(none)"}" is active now. Re-verify with list_profiles or ` +
+          'vortex_query({selector: "activeGameId"}) before retrying.',
+      );
+    }
+  }
+}
+
 export interface ApiDescription {
   /** Names callable via query({ selector, args }) — each is (state, ...args) => value. */
   selectors: string[];
@@ -572,7 +623,9 @@ export async function dispatchAction(
   api: IExtensionApi,
   name: string,
   args: unknown[] = [],
+  expectedContext?: ExpectedContext,
 ): Promise<unknown> {
+  assertExpectedContext(api, expectedContext);
   const fn = (actions as Record<string, unknown>)[name];
   if (typeof fn === "function") {
     const result = (fn as (...fnArgs: unknown[]) => unknown)(...args);
@@ -629,7 +682,12 @@ export async function dispatchAction(
   );
 }
 
-export function switchProfile(api: IExtensionApi, profileId: string): void {
+export function switchProfile(
+  api: IExtensionApi,
+  profileId: string,
+  expectedContext?: ExpectedContext,
+): void {
+  assertExpectedContext(api, expectedContext);
   const st = state(api);
   if (selectors.profiles(st)[profileId] === undefined) {
     throw new Error(`Unknown profile: ${profileId}`);
@@ -831,7 +889,9 @@ export async function setModsEnabled(
   modIds: string[],
   enabled: boolean,
   profileId?: string,
+  expectedContext?: ExpectedContext,
 ): Promise<void> {
+  assertExpectedContext(api, expectedContext);
   const st = state(api);
   const targetProfileId = profileId ?? selectors.activeProfileId(st);
   if (!targetProfileId) {
@@ -862,7 +922,12 @@ interface DiscoveredTool {
  * suggestDeploy: true mirrors Vortex's own "Play" button, which is what actually
  * surfaces the "files changed outside Vortex" prompt list_dialogs/closeDialog exist for.
  */
-export async function launchGame(api: IExtensionApi, gameId?: string): Promise<void> {
+export async function launchGame(
+  api: IExtensionApi,
+  gameId?: string,
+  expectedContext?: ExpectedContext,
+): Promise<void> {
+  assertExpectedContext(api, expectedContext);
   const st = state(api);
   const targetGameId = resolveGameId(gameId, st);
   const toolId = queryStatePath(api, ["settings", "interface", "primaryTool", targetGameId]) as

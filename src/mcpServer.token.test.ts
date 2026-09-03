@@ -179,9 +179,11 @@ describe("mcpServer bearer token gating", () => {
       },
     );
     expect(res.status).toBe(200);
-    expect(dispatchAction).toHaveBeenCalledWith(expect.anything(), "nexusGetModInfo", [
-      "skyrimse",
-      63979,
-    ]);
+    expect(dispatchAction).toHaveBeenCalledWith(
+      expect.anything(),
+      "nexusGetModInfo",
+      ["skyrimse", 63979],
+      { activeProfileId: undefined, activeGameId: undefined },
+    );
   });
 });

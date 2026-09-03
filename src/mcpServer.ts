@@ -14,6 +14,29 @@ import * as control from "./vortexControl";
 
 type IExtensionApi = types.IExtensionApi;
 
+// Opt-in staleness guard for writes — see assertExpectedContext's own doc comment in
+// vortexControl.ts for why this exists (a real cold-run incident: the active profile
+// silently reverted mid-analysis with zero signal from any tool here). Shared across
+// every write tool that can be meaningfully mis-targeted by a stale assumption about
+// what's currently active.
+const expectedContextSchema = {
+  expectedActiveProfileId: z
+    .string()
+    .optional()
+    .describe(
+      "If set, throws instead of proceeding when this isn't the active profile right now " +
+        "— guards against the active profile having changed since you last checked it " +
+        "(another agent, the user's own Vortex UI, anything). Omit to skip the check.",
+    ),
+  expectedActiveGameId: z
+    .string()
+    .optional()
+    .describe(
+      "If set, throws instead of proceeding when this isn't the active game right now. " +
+        "Omit to skip the check.",
+    ),
+};
+
 const PORT = Number(process.env.VORTEX_MCP_PORT ?? 3701);
 const HOST = "127.0.0.1";
 // Set VORTEX_MCP_TOKEN to require `Authorization: Bearer <token>` on every request AND to
@@ -623,13 +646,16 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
         "Vortex UI. This tool call returns as soon as the switch is DISPATCHED, not once " +
         "deployment finishes — poll needToDeployForGame or watch for a 'deploying' " +
         "notification (list_notifications) if you need to know when it's actually done. " +
-        "Switching to an unknown profileId throws.",
+        "Switching to an unknown profileId throws. Pass expectedActiveProfileId to guard " +
+        "against acting on a stale assumption about what's currently active — see its own " +
+        "param description.",
       inputSchema: z.object({
         profileId: z.string().describe("Target profile id (query list_profiles to find one)"),
+        expectedActiveProfileId: expectedContextSchema.expectedActiveProfileId,
       }),
     },
-    async ({ profileId }) => {
-      control.switchProfile(api, profileId);
+    async ({ profileId, expectedActiveProfileId }) => {
+      control.switchProfile(api, profileId, { activeProfileId: expectedActiveProfileId });
       return { content: [{ type: "text", text: `Switched to profile ${profileId}` }] };
     },
   );
@@ -695,7 +721,9 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
         "vortex_describe's `dispatchHints`/`extensionApiHints`/`eventHints`/`listenerHints` " +
         "for the real argument order (incl. the __CALLBACK__ position) where this project has " +
         "verified one; for anything else, check Vortex's source or test carefully with a " +
-        "state read before/after.",
+        "state read before/after. Pass expectedActiveProfileId/expectedActiveGameId to guard " +
+        "against dispatching a write based on a stale assumption about what's currently " +
+        "active — see their own param descriptions.",
       inputSchema: z.object({
         action: z.string().describe("Action creator, api.ext function, event, or api method name"),
         args: z
@@ -706,10 +734,15 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
               '(include "__CALLBACK__" at the callback position to await a callback-based ' +
               "event, or to register a persistent listener)",
           ),
+        expectedActiveProfileId: expectedContextSchema.expectedActiveProfileId,
+        expectedActiveGameId: expectedContextSchema.expectedActiveGameId,
       }),
     },
-    async ({ action, args }) => {
-      const dispatched = await control.dispatchAction(api, action, args);
+    async ({ action, args, expectedActiveProfileId, expectedActiveGameId }) => {
+      const dispatched = await control.dispatchAction(api, action, args, {
+        activeProfileId: expectedActiveProfileId,
+        activeGameId: expectedActiveGameId,
+      });
       return { content: [jsonText(dispatched)] };
     },
   );
@@ -781,15 +814,22 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
     "set_mods_enabled",
     {
       description:
-        "Enable or disable a set of mods for a profile (defaults to the active profile). Does not deploy.",
+        "Enable or disable a set of mods for a profile (defaults to the active profile). Does " +
+        "not deploy. Pass expectedActiveProfileId to guard against acting on a stale " +
+        "assumption about what's currently active, especially relevant when profileId is " +
+        "omitted (defaults to whatever's active right now, which may not be what you last " +
+        "observed) — see its own param description.",
       inputSchema: z.object({
         modIds: z.array(z.string()).min(1),
         enabled: z.boolean(),
         profileId: z.string().optional(),
+        expectedActiveProfileId: expectedContextSchema.expectedActiveProfileId,
       }),
     },
-    async ({ modIds, enabled, profileId }) => {
-      await control.setModsEnabled(api, modIds, enabled, profileId);
+    async ({ modIds, enabled, profileId, expectedActiveProfileId }) => {
+      await control.setModsEnabled(api, modIds, enabled, profileId, {
+        activeProfileId: expectedActiveProfileId,
+      });
       return {
         content: [
           { type: "text", text: `${enabled ? "Enabled" : "Disabled"} ${modIds.length} mod(s)` },
@@ -809,10 +849,11 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
         "deploy. Throws if the game has no primary tool configured.",
       inputSchema: z.object({
         gameId: z.string().optional().describe("Game id; defaults to the active game"),
+        expectedActiveGameId: expectedContextSchema.expectedActiveGameId,
       }),
     },
-    async ({ gameId }) => {
-      await control.launchGame(api, gameId);
+    async ({ gameId, expectedActiveGameId }) => {
+      await control.launchGame(api, gameId, { activeGameId: expectedActiveGameId });
       return { content: [{ type: "text", text: `Launched ${gameId ?? "active game"}` }] };
     },
   );
