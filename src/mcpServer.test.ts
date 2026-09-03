@@ -16,6 +16,7 @@ vi.mock("./vortexControl", () => ({
     extensionApis: [],
   })),
   querySelector: vi.fn(() => undefined),
+  scanExtensionActions: vi.fn(async () => []),
   queryStatePath: vi.fn(() => undefined),
   switchProfile: vi.fn(),
   cloneProfile: vi.fn(async () => ({
@@ -166,6 +167,7 @@ describe("mcpServer HTTP gating", () => {
       expect.arrayContaining([
         "vortex_query",
         "vortex_describe",
+        "scan_extension_actions",
         "list_mods",
         "list_load_order",
         "get_plugin_details",

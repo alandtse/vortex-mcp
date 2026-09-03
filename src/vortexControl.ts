@@ -650,6 +650,248 @@ export function pollListener(
 // caller is unambiguously opting in, not accidentally triggering it.
 const RAW_ACTION_TYPE_PREFIX = "type:";
 
+export interface DiscoveredAction {
+  /** The literal Redux action type string — use with vortex_dispatch as action="type:<this>". */
+  type: string;
+  /**
+   * Best-effort recovered payload shape: maps each payload object key to the positional
+   * index of the creator's own argument it comes from, e.g. {pluginName: 0, enabled: 1}
+   * for a creator declared `(pluginName, enabled) => ({pluginName, enabled})`. Empty when
+   * `passthroughPayload` is true, or when the creator's shape didn't match a recognized
+   * pattern (still report the type string alone in that case — a bare type with unknown
+   * shape is still more than nothing).
+   */
+  payloadKeys: Record<string, number>;
+  /**
+   * True when the creator takes a single argument used directly as the whole payload
+   * (no wrapping object), e.g. `pluginName => pluginName` — dispatch with
+   * args=[thatValueDirectly], matching how the RAW_ACTION_TYPE_PREFIX path already
+   * treats args[0] as the whole payload.
+   */
+  passthroughPayload: boolean;
+  /** Extension directory name this was found in — provenance only, not guaranteed stable across Vortex releases. */
+  extension: string;
+}
+
+// Found live (verified on a real installed Vortex, not guessed): every bundled extension
+// ships its compiled JS unpacked on disk (util.getVortexPath("bundledPlugins") resolves
+// this correctly across platforms/packaging — NOT hardcoded to a Program Files path), and
+// user-installed/third-party extensions live under <userData>/plugins the same way
+// vortex-mcp itself does. Both are plain files readable via fs, no app.asar archive
+// parsing needed. This makes every dispatchable extension-internal action mechanically
+// discoverable at runtime on ANY real installation — not just one with Vortex's
+// TypeScript source checked out — which is the whole point: RAW_ACTION_TYPE_PREFIX
+// dispatch needs a type string (and ideally a payload shape) from *somewhere*, and this
+// is that somewhere, without hand-curating a growing list into this project's own source.
+function extensionScanRoots(): string[] {
+  const roots = [util.getVortexPath("bundledPlugins")];
+  const userPluginsDir = path.join(util.getVortexPath("userData"), "plugins");
+  if (!roots.includes(userPluginsDir)) {
+    roots.push(userPluginsDir);
+  }
+  return roots;
+}
+
+// redux-act's createAction(TYPE, prepareFn) is called through Rollup's CJS-interop
+// wrapper in these bundles — literally `(0,g.createAction)(...)`, confirmed live — so a
+// plain substring search for "createAction" followed by "walk forward to the next '('"
+// finds the real call's argument list regardless of whether that "(" is immediately
+// adjacent or preceded by the interop wrapper's closing ")".
+function findMatchingParenEnd(text: string, openParenIdx: number): number {
+  let depth = 0;
+  let inString: string | null = null;
+  for (let i = openParenIdx; i < text.length; i++) {
+    const ch = text[i];
+    if (inString !== null) {
+      if (ch === "\\") {
+        i++;
+        continue;
+      }
+      if (ch === inString) {
+        inString = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inString = ch;
+      continue;
+    }
+    if (ch === "(" || ch === "[" || ch === "{") {
+      depth++;
+    } else if (ch === ")" || ch === "]" || ch === "}") {
+      depth--;
+      if (depth === 0) {
+        return i;
+      }
+    }
+  }
+  return -1;
+}
+
+// Splits `text` on top-level commas only — not ones nested inside (), [], {}, or a
+// string literal. Used both for a call's argument list and an object literal's entries.
+function splitTopLevel(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let inString: string | null = null;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString !== null) {
+      if (ch === "\\") {
+        i++;
+        continue;
+      }
+      if (ch === inString) {
+        inString = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inString = ch;
+    } else if (ch === "(" || ch === "[" || ch === "{") {
+      depth++;
+    } else if (ch === ")" || ch === "]" || ch === "}") {
+      depth--;
+    } else if (ch === "," && depth === 0) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts.map((p) => p.trim()).filter((p) => p.length > 0);
+}
+
+const QUOTED_STRING = /^(["'`])((?:\\.|(?!\1).)*)\1$/;
+
+/** Recovers {payloadKeys, passthroughPayload} from a prepare-function's source text, when its shape matches a recognized pattern. Unrecognized shapes return both empty/false — still leaves the type string itself usable. */
+function parsePrepareFnShape(fnText: string): {
+  payloadKeys: Record<string, number>;
+  passthroughPayload: boolean;
+} {
+  // (a,b,...) => ({key: a, other: b, ...})  OR  a => ({key: a})
+  const arrowMatch = /^\(?([^)=]*)\)?\s*=>\s*\(\{([\s\S]*)\}\)\s*$/.exec(fnText);
+  if (arrowMatch) {
+    const params = splitTopLevel(arrowMatch[1]).filter((p) => p.length > 0);
+    const paramIndex = new Map(params.map((p, idx) => [p, idx]));
+    const payloadKeys: Record<string, number> = {};
+    for (const entry of splitTopLevel(arrowMatch[2])) {
+      const colonIdx = entry.indexOf(":");
+      if (colonIdx === -1) {
+        // shorthand { key } -- key and value are the same identifier
+        const idx = paramIndex.get(entry.trim());
+        if (idx !== undefined) {
+          payloadKeys[entry.trim()] = idx;
+        }
+        continue;
+      }
+      const key = entry.slice(0, colonIdx).trim();
+      const value = entry.slice(colonIdx + 1).trim();
+      const idx = paramIndex.get(value);
+      if (idx !== undefined) {
+        payloadKeys[key] = idx;
+      }
+    }
+    return { payloadKeys, passthroughPayload: false };
+  }
+  // bare single-identifier passthrough: a => a  (payload IS that one argument)
+  const passthroughMatch = /^\(?([a-zA-Z_$][\w$]*)\)?\s*=>\s*\1\s*$/.exec(fnText);
+  if (passthroughMatch) {
+    return { payloadKeys: {}, passthroughPayload: true };
+  }
+  return { payloadKeys: {}, passthroughPayload: false };
+}
+
+function scanFileForActions(text: string, extensionName: string): DiscoveredAction[] {
+  const results: DiscoveredAction[] = [];
+  const seenTypes = new Set<string>();
+  let searchFrom = 0;
+  while (true) {
+    const markerIdx = text.indexOf("createAction", searchFrom);
+    if (markerIdx === -1) {
+      break;
+    }
+    searchFrom = markerIdx + "createAction".length;
+    const openParenIdx = text.indexOf("(", searchFrom);
+    if (openParenIdx === -1 || openParenIdx - searchFrom > 5) {
+      // Not immediately followed by a call (allowing a few chars for the ")(" interop
+      // pattern) -- this occurrence is something else (e.g. a comment, an import name).
+      continue;
+    }
+    const closeParenIdx = findMatchingParenEnd(text, openParenIdx);
+    if (closeParenIdx === -1) {
+      continue;
+    }
+    const argsText = text.slice(openParenIdx + 1, closeParenIdx);
+    const [typeArg, prepareArg] = splitTopLevel(argsText);
+    if (typeArg === undefined) {
+      continue;
+    }
+    const typeMatch = QUOTED_STRING.exec(typeArg);
+    if (typeMatch === null) {
+      // First arg isn't a plain string literal (could be a computed/variable type in
+      // rare cases) -- skip rather than report a bogus type.
+      continue;
+    }
+    const type = typeMatch[2];
+    if (seenTypes.has(type)) {
+      continue;
+    }
+    seenTypes.add(type);
+    const shape =
+      prepareArg !== undefined
+        ? parsePrepareFnShape(prepareArg)
+        : { payloadKeys: {}, passthroughPayload: false };
+    results.push({ type, extension: extensionName, ...shape });
+  }
+  return results;
+}
+
+let cachedDiscoveredActions: DiscoveredAction[] | undefined;
+
+/**
+ * Scans every installed extension's compiled JS (bundled + user-installed, both plain
+ * files on disk — see extensionScanRoots) for redux-act createAction(TYPE, prepareFn)
+ * call sites, recovering the real dispatchable action type string and, where the
+ * prepare-function's shape is recognizable, its payload structure — without needing
+ * Vortex's TypeScript source checked out anywhere. This is what makes
+ * RAW_ACTION_TYPE_PREFIX ("type:") dispatch discoverable on an arbitrary real
+ * installation instead of only for the handful of cases this project happened to
+ * hand-document by reading source. Cached for the process lifetime (these files only
+ * change when Vortex/an extension updates) — pass forceRefresh to re-scan.
+ */
+export async function scanExtensionActions(
+  api: IExtensionApi,
+  forceRefresh = false,
+): Promise<DiscoveredAction[]> {
+  if (!forceRefresh && cachedDiscoveredActions !== undefined) {
+    return cachedDiscoveredActions;
+  }
+  const results: DiscoveredAction[] = [];
+  for (const root of extensionScanRoots()) {
+    let extensionDirs: string[];
+    try {
+      extensionDirs = (await readdir(root, { withFileTypes: true }))
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    } catch {
+      continue; // root doesn't exist on this install (e.g. no user-installed extensions yet)
+    }
+    for (const extensionName of extensionDirs) {
+      const entryPath = path.join(root, extensionName, "index.cjs");
+      let text: string;
+      try {
+        text = await readFile(entryPath, "utf8");
+      } catch {
+        continue; // not every extension necessarily bundles to index.cjs; skip rather than guess
+      }
+      results.push(...scanFileForActions(text, extensionName));
+    }
+  }
+  cachedDiscoveredActions = results;
+  return results;
+}
+
 export async function dispatchAction(
   api: IExtensionApi,
   name: string,

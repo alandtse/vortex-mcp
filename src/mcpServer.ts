@@ -152,6 +152,42 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "scan_extension_actions",
+    {
+      description:
+        "Discover real dispatchable Redux action type strings — and, where recoverable, " +
+        "their payload shape — by scanning every installed extension's own compiled JS " +
+        "on disk (bundled + user-installed, both plain files, no source checkout or " +
+        "app.asar archive parsing needed). This is what most action creators defined " +
+        "inside an extension's own module (as opposed to Vortex core) actually need: " +
+        "vortex_describe's `actions` list only contains what's re-exported through the " +
+        "published @nexusmods/vortex-api package, which most extension-internal action " +
+        "creators (confirmed live: 79 of 81 across this install's extensions) never are " +
+        "— those are otherwise undiscoverable, not just undocumented. Each result's " +
+        "`type` is usable directly with vortex_dispatch as action='type:<type>'. " +
+        "`payloadKeys` maps each payload object key to which positional argument (0-" +
+        "indexed) it came from in the original creator — e.g. {pluginName: 0, enabled: " +
+        "1} means dispatch with args=[{pluginName: <value>, enabled: <value>}]. " +
+        "`passthroughPayload: true` means the payload IS the single argument directly — " +
+        "dispatch with args=[<value>] (no wrapping object). Both empty means the type " +
+        "string was recovered but its shape wasn't recognized — still more than nothing, " +
+        "but verify the shape yourself before dispatching. Cached after the first call " +
+        "(these files only change when Vortex/an extension updates) — pass forceRefresh " +
+        "to re-scan after an update. A real filesystem scan across every installed " +
+        "extension, not instant, but a one-time cost per process lifetime.",
+      inputSchema: z.object({
+        forceRefresh: z
+          .boolean()
+          .optional()
+          .describe("Re-scan instead of returning the cached result from an earlier call"),
+      }),
+    },
+    async ({ forceRefresh }) => ({
+      content: [jsonText(await control.scanExtensionActions(api, forceRefresh))],
+    }),
+  );
+
+  server.registerTool(
     "vortex_query",
     {
       description:

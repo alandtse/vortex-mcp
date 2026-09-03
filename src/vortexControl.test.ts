@@ -85,6 +85,7 @@ import {
   queryStatePath,
   querySelector,
   restartVortex,
+  scanExtensionActions,
   setModsEnabled,
   switchProfile,
 } from "./vortexControl";
@@ -729,6 +730,147 @@ describe("vortexControl: restart", () => {
     (globalThis as { window?: unknown }).window = {};
 
     expect(() => restartVortex()).toThrow(/window.api.app.relaunch/);
+  });
+});
+
+async function writeExtensionBundle(
+  root: string,
+  extensionName: string,
+  text: string,
+): Promise<void> {
+  const dir = path.join(root, extensionName);
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, "index.cjs"), text);
+}
+
+describe("vortexControl: scanExtensionActions", () => {
+  let bundledRoot: string;
+  let userDataRoot: string;
+
+  beforeEach(async () => {
+    bundledRoot = await mkdtemp(path.join(os.tmpdir(), "vortex-mcp-test-bundled-"));
+    userDataRoot = await mkdtemp(path.join(os.tmpdir(), "vortex-mcp-test-userdata-"));
+    vi.mocked(util.getVortexPath).mockImplementation((id: string) => {
+      if (id === "bundledPlugins") return bundledRoot;
+      if (id === "userData") return userDataRoot;
+      return "";
+    });
+  });
+
+  afterEach(async () => {
+    await rm(bundledRoot, { recursive: true, force: true });
+    await rm(userDataRoot, { recursive: true, force: true });
+  });
+
+  it("recovers type and payload key->argIndex shape from a real minified createAction call site", async () => {
+    // The exact byte sequence confirmed live in gamebryo-plugin-management/index.cjs.
+    await writeExtensionBundle(
+      bundledRoot,
+      "gamebryo-plugin-management",
+      "const N=(0,g.createAction)(`SET_PLUGIN_ENABLED`,(e,t)=>({pluginName:e,enabled:t}));",
+    );
+
+    const result = await scanExtensionActions(fakeApi(), true);
+
+    expect(result).toEqual([
+      {
+        type: "SET_PLUGIN_ENABLED",
+        extension: "gamebryo-plugin-management",
+        payloadKeys: { pluginName: 0, enabled: 1 },
+        passthroughPayload: false,
+      },
+    ]);
+  });
+
+  it("recognizes a passthrough (bare-identifier) creator as payload=args[0]", async () => {
+    await writeExtensionBundle(
+      bundledRoot,
+      "some-ext",
+      "x=(0,g.createAction)(`CLEAR_USERLIST`,e=>e);",
+    );
+
+    const result = await scanExtensionActions(fakeApi(), true);
+
+    expect(result).toEqual([
+      {
+        type: "CLEAR_USERLIST",
+        extension: "some-ext",
+        payloadKeys: {},
+        passthroughPayload: true,
+      },
+    ]);
+  });
+
+  it("still reports the type string when the prepare-fn shape isn't recognized", async () => {
+    await writeExtensionBundle(
+      bundledRoot,
+      "weird-ext",
+      "x=(0,g.createAction)(`SOME_TYPE`,(a,b,c)=>doSomethingComplicated(a,b,c));",
+    );
+
+    const result = await scanExtensionActions(fakeApi(), true);
+
+    expect(result).toEqual([
+      { type: "SOME_TYPE", extension: "weird-ext", payloadKeys: {}, passthroughPayload: false },
+    ]);
+  });
+
+  it("finds multiple createAction sites in one file and dedupes repeated types", async () => {
+    await writeExtensionBundle(
+      bundledRoot,
+      "multi-ext",
+      "a=(0,g.createAction)(`TYPE_ONE`,e=>e),b=(0,g.createAction)(`TYPE_TWO`,(e,t)=>({x:e,y:t})),c=(0,g.createAction)(`TYPE_ONE`,e=>e);",
+    );
+
+    const result = await scanExtensionActions(fakeApi(), true);
+
+    expect(result.map((r) => r.type)).toEqual(["TYPE_ONE", "TYPE_TWO"]);
+  });
+
+  it("scans both the bundled and user-installed plugin roots", async () => {
+    await writeExtensionBundle(
+      bundledRoot,
+      "builtin-ext",
+      "(0,g.createAction)(`BUILTIN_TYPE`,e=>e);",
+    );
+    await writeExtensionBundle(
+      path.join(userDataRoot, "plugins"),
+      "vortex-mcp",
+      "(0,g.createAction)(`USER_TYPE`,e=>e);",
+    );
+
+    const result = await scanExtensionActions(fakeApi(), true);
+
+    expect(result.map((r) => r.type).toSorted()).toEqual(["BUILTIN_TYPE", "USER_TYPE"]);
+  });
+
+  it("skips an extension directory with no index.cjs rather than throwing", async () => {
+    await mkdir(path.join(bundledRoot, "no-bundle-here"), { recursive: true });
+    await writeExtensionBundle(bundledRoot, "real-ext", "(0,g.createAction)(`REAL_TYPE`,e=>e);");
+
+    const result = await scanExtensionActions(fakeApi(), true);
+
+    expect(result.map((r) => r.type)).toEqual(["REAL_TYPE"]);
+  });
+
+  it("caches results across calls until forceRefresh is passed", async () => {
+    await writeExtensionBundle(bundledRoot, "ext-a", "(0,g.createAction)(`FIRST_SCAN_TYPE`,e=>e);");
+    const first = await scanExtensionActions(fakeApi(), true);
+    expect(first.map((r) => r.type)).toEqual(["FIRST_SCAN_TYPE"]);
+
+    await writeExtensionBundle(
+      bundledRoot,
+      "ext-b",
+      "(0,g.createAction)(`SECOND_SCAN_TYPE`,e=>e);",
+    );
+    const cached = await scanExtensionActions(fakeApi(), false);
+    expect(cached.map((r) => r.type)).toEqual(["FIRST_SCAN_TYPE"]);
+
+    const refreshed = await scanExtensionActions(fakeApi(), true);
+    expect(refreshed.map((r) => r.type).toSorted()).toEqual([
+      "FIRST_SCAN_TYPE",
+      "SECOND_SCAN_TYPE",
+    ]);
   });
 });
 
