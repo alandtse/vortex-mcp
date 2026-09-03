@@ -67,6 +67,7 @@ import {
   listCategories,
   listDialogs,
   listDownloads,
+  listExternalChanges,
   listDuplicateMods,
   listFileConflicts,
   listKnownModConflicts,
@@ -1050,6 +1051,50 @@ describe("vortexControl: listDialogs", () => {
     });
 
     expect(listDialogs(api)).toEqual([]);
+  });
+});
+
+describe("vortexControl: listExternalChanges", () => {
+  it("surfaces pending external changes from session.mods.changes", () => {
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      session: {
+        mods: {
+          changes: [
+            {
+              filePath: "SKSE\\Plugins\\EngineFixes.dll",
+              source: "Engine Fixes VR-62089-7-1-1-1776053056",
+              modTypeId: "",
+              type: "refchange",
+              action: "newest",
+              sourceModified: "2026-08-29T20:45:53.950Z",
+              destModified: "2026-09-01T09:16:14.605Z",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(listExternalChanges(api)).toEqual([
+      {
+        filePath: "SKSE\\Plugins\\EngineFixes.dll",
+        source: "Engine Fixes VR-62089-7-1-1-1776053056",
+        modTypeId: "",
+        type: "refchange",
+        action: "newest",
+        sourceModified: "2026-08-29T20:45:53.950Z",
+        destModified: "2026-09-01T09:16:14.605Z",
+      },
+    ]);
+  });
+
+  it("returns an empty array when nothing is pending", () => {
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      session: { mods: {} },
+    });
+
+    expect(listExternalChanges(api)).toEqual([]);
   });
 });
 

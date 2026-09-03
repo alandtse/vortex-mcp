@@ -107,7 +107,8 @@ hand-transcribed, so it can't silently drift from the code.
 | `find_missing_deployed_files` | read   | Find plugins where Vortex's load-order state, what's actually deployed to the game's Data folder, and what the game's own plugins.txt says…  |
 | `find_orphaned_files`         | read   | Find files Vortex's own deployment manifest (<Data>/vortex.deployment.json — the same bookkeeping Vortex reads for its own Purge) still att… |
 | `check_nexus_mod_updates`     | read   | Check installed Nexus-sourced mods for available updates via Vortex's own built-in integration and the user's existing Vortex login — no se… |
-| `list_dialogs`                | read   | List Vortex's currently-open modal dialogs (e.g. a 'files changed outside Vortex' prompt that can block a deploy) — distinct from list_noti… |
+| `list_dialogs`                | read   | List Vortex's currently-open GENERIC modal dialogs (showDialog-based — most confirmation/question/error prompts) — distinct from list_notif… |
+| `list_external_changes`       | read   | List pending 'external changes' Vortex detected (a deployed file differs from what Vortex itself put there) that are BLOCKING an in-progres… |
 | `switch_profile`              | write  | Switch Vortex to a different profile by id (query list_profiles to find one).                                                                |
 | `clone_profile`               | write  | Clone an existing profile into a new one (copies its on-disk profile directory — load order, ini tweaks — plus its mod enabled-state), the…  |
 | `vortex_dispatch`             | write  | Dispatch a named Vortex action creator, api.ext function, event, or direct api method — tried in that order.                                 |

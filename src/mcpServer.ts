@@ -571,15 +571,41 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
     "list_dialogs",
     {
       description:
-        "List Vortex's currently-open modal dialogs (e.g. a 'files changed outside " +
-        "Vortex' prompt that can block a deploy) — distinct from list_notifications' " +
-        "toast notifications. Each entry's `actions` array is the exact set of labels " +
+        "List Vortex's currently-open GENERIC modal dialogs (showDialog-based — most " +
+        "confirmation/question/error prompts) — distinct from list_notifications' toast " +
+        "notifications. Each entry's `actions` array is the exact set of labels " +
         "closeDialog's actionKey must match (via vortex_dispatch) — read this before " +
-        "responding, never guess a choice.",
+        "responding, never guess a choice. Does NOT cover the 'files changed outside " +
+        "Vortex' dialog that can block a deploy/purge/profile-switch — confirmed live " +
+        "that one uses a separate mechanism entirely and stays invisible here even while " +
+        "genuinely open and stalling a deploy; use list_external_changes for that one.",
       inputSchema: z.object({}),
     },
     async () => ({
       content: [jsonText(control.listDialogs(api))],
+    }),
+  );
+
+  server.registerTool(
+    "list_external_changes",
+    {
+      description:
+        "List pending 'external changes' Vortex detected (a deployed file differs from " +
+        "what Vortex itself put there) that are BLOCKING an in-progress deploy/purge/" +
+        "profile-switch — confirmed live to be invisible to list_dialogs and to " +
+        "list_notifications (which only shows a generic stalled 'Deploying' activity, no " +
+        "hint it's actually stuck waiting on a decision). If a deploy/switch_profile call " +
+        "seems to hang, check this. Each entry's `action` is Vortex's own already-chosen " +
+        "default (e.g. 'newest'). RESOLUTION: requires Vortex's own " +
+        "setExternalChangeAction/confirmExternalChanges extension APIs, which exist in " +
+        "source but were confirmed NOT present in this build's live reflection as of this " +
+        "writing (dispatching confirmExternalChanges failed with an unknown-action error) " +
+        "— this tool can detect the block but not resolve it until a build that includes " +
+        "them is running; until then, answer the dialog in Vortex's own UI.",
+      inputSchema: z.object({}),
+    },
+    async () => ({
+      content: [jsonText(control.listExternalChanges(api))],
     }),
   );
 }

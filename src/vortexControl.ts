@@ -1025,6 +1025,49 @@ export function listDialogs(api: IExtensionApi): DialogSummary[] {
   });
 }
 
+export interface ExternalFileChange {
+  filePath: string;
+  /** Mod id the deployed file came from. */
+  source: string;
+  modTypeId: string;
+  type: string;
+  /** The action that will be applied when confirmed, e.g. "newest" — Vortex's own default pick per entry, not something this project computes. */
+  action: string;
+  sourceModified: string;
+  destModified: string;
+}
+
+/**
+ * Lists pending "external changes" Vortex detected (a deployed file differs from what
+ * Vortex itself put there — edited outside Vortex, or a mod rewriting its own file at
+ * runtime, e.g. an SKSE plugin that self-updates) that are BLOCKING an in-progress
+ * deploy/purge/profile-switch. Found live to be a genuinely separate mechanism from
+ * list_dialogs: the real in-app "External Changes" dialog (ExternalChangeDialog.tsx)
+ * blocks on a private module-scoped Promise inside mod_management's own code, not
+ * Vortex's generic showDialog/session.notifications.dialogs state list_dialogs reads —
+ * confirmed live that list_dialogs returns [] while this was genuinely open and had
+ * stalled a real deploy for over 10 minutes with no visible signal anywhere else this
+ * project already surfaces (list_notifications only showed a generic "Deploying"
+ * activity, no hint it was actually stuck waiting on a decision). A non-empty result
+ * here, combined with a stalled "Deploying" notification, means a deploy is blocked on
+ * this — even though every other read tool looks like nothing is wrong.
+ *
+ * RESOLUTION: this project's Vortex source tree has (as of this writing) unbuilt,
+ * uncommitted registerAPI calls for exactly this — setExternalChangeAction(filePaths,
+ * action) and confirmExternalChanges(cancel?) in mod_management/index.ts — but they were
+ * confirmed NOT present in vortex_describe's live apiMethods/extensionApis on the
+ * currently-running build (dispatching confirmExternalChanges failed with "Unknown
+ * action..."). Once a Vortex build that includes them is running, dispatch
+ * confirmExternalChanges via vortex_dispatch to accept each entry's already-chosen
+ * `action` and unblock the deploy; until then, this tool can DETECT the block but not
+ * resolve it — the dialog must be answered in Vortex's own UI.
+ */
+export function listExternalChanges(api: IExtensionApi): ExternalFileChange[] {
+  return (
+    (queryStatePath(api, ["session", "mods", "changes"]) as ExternalFileChange[] | undefined) ?? []
+  );
+}
+
 export interface ModRuleSummary {
   type: string;
   /**

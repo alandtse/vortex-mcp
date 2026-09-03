@@ -32,6 +32,7 @@ const ACCESS_TIER = {
   list_mod_rules: "read",
   find_mod_dependents: "read",
   list_dialogs: "read",
+  list_external_changes: "read",
   find_mod_by_file: "read",
   list_file_conflicts: "read",
   find_missing_masters: "read",
