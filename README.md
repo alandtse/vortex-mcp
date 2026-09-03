@@ -10,23 +10,24 @@ endpoint, no clicking through the UI.
 
 Unit- and integration-tested (real HTTP requests against the actual server,
 real Host/Origin/token gating, real MCP `initialize` handshake) — see
-`pnpm run test`. Every read tool, and `vortex_dispatch` across all four of
+`pnpm run test`. Every read tool, and `vortex_dispatch` across all five of
 its fallback tiers (action creator, api.ext function, event — both
 fire-and-forget and `"__CALLBACK__"`-awaited, e.g.
-`action="deploy-mods", args=["__CALLBACK__"]` — and direct api method,
+`action="deploy-mods", args=["__CALLBACK__"]` — direct api method,
 including the listener-registering subset paired with `poll_listener` —
 registered `onStateChange` against a real state path, triggered two real
 firings via `setAdvancedMode`, and confirmed `poll_listener` returned both
 in order, non-destructively, with `since` correctly filtering to only
-what's new), has been live-verified against a real Vortex install against
-a disposable test profile, with a `backup_state` snapshot taken before
-starting. `launch_game` was live-verified end to end — deploy, launch,
-confirmed the real game process came up — with explicit confirmation
-first, since unlike everything else here it has a visible real-world side
-effect. The `start-download` event (installing a mod from a URL) is
-deliberately never exercised outside unit tests — it can trigger a
-blocking "choose install type" modal for ambiguous archives, unsafe to
-risk unsupervised.
+what's new; and the raw `"type:<TYPE>"` fallback, paired with
+`scan_extension_actions`), has been live-verified against a real Vortex
+install against a disposable test profile, with a `backup_state` snapshot
+taken before starting. `launch_game` was live-verified end to end —
+deploy, launch, confirmed the real game process came up — with explicit
+confirmation first, since unlike everything else here it has a visible
+real-world side effect. The `start-download` event (installing a mod from
+a URL) is deliberately never exercised outside unit tests — it can
+trigger a blocking "choose install type" modal for ambiguous archives,
+unsafe to risk unsupervised.
 
 ## Stack
 
@@ -134,16 +135,19 @@ real join (mod ↔ profile enabled-state, friendly name via `renderModName`)
 that reflection can't do in one call.
 
 `vortex_dispatch` extends the same reflection principle to writes, trying
-four fallback tiers in order by name: (1) a Redux `actions` creator, (2) a
+five fallback tiers in order by name: (1) a Redux `actions` creator, (2) a
 same-named `api.ext.*` function (Vortex's own built-in Nexus Mods
 integration, plus anything a third-party extension registers the same
 way), (3) a currently-registered event name, emitted via `api.events.emit`
 — fire-and-forget by default, or awaited to real completion (not just
 "started") when the caller passes a `"__CALLBACK__"` sentinel at the
 position Vortex's own handler expects a Node-style `(err, result?) => void`
-callback (e.g. `action="deploy-mods", args=["__CALLBACK__"]`), and (4) a
+callback (e.g. `action="deploy-mods", args=["__CALLBACK__"]`), (4) a
 direct method on the `api` object itself (e.g. `translate`,
-`sendNotification`, `runExecutable`). None of the four tiers is
+`sendNotification`, `runExecutable`), and (5) a literal `"type:<TYPE>"`
+prefix, dispatching a raw `{type, payload}` Redux action directly —
+`payload` is `args[0]` verbatim, bypassing tier (1)'s named-creator lookup
+entirely. None of the five tiers is
 allowlisted. The security boundary is the loopback bind + bearer token
 (see [Safety](#safety)) — once an operator holds the token they already
 have "full write privileges" per this project's own model, matching what a
@@ -162,6 +166,31 @@ project has verified, surfaced via `vortex_describe`'s `dispatchHints`/
 first. An action, `api.ext` function, event, or api method missing from
 these maps still dispatches fine; you just don't get a pre-verified
 argument order.
+
+Tier (5) exists because most action creators defined _inside_ an
+extension's own module (as opposed to Vortex core) — e.g.
+`gamebryo-plugin-management`'s `SET_PLUGIN_ENABLED`, the actual per-PLUGIN
+enable toggle, distinct from the mod-level `set_mods_enabled` — are never
+re-exported through the published `@nexusmods/vortex-api` package tier (1)
+depends on, so they're invisible to `vortex_describe`'s `actions` list
+entirely (confirmed live: 79 of 81 across one real install's extensions).
+`scan_extension_actions` closes that gap by scanning every installed
+extension's own compiled JS on disk (bundled + user-installed — both
+plain files, no source checkout or `app.asar` archive parsing needed) for
+`createAction(TYPE, prepareFn)` call sites, recovering the real type
+string and, from the prepare-function's own source text, its payload
+shape (key names _and_ argument order survive minification even when
+parameter names get mangled, since a minifier can't rewrite an object
+literal's keys without breaking the payload contract). This is what makes
+tier (5) genuinely usable rather than just a raw escape hatch: a live
+scan on this install recovers a usable shape for 100% of real actions
+found, not just the type string. It's shape only, not reducer
+_behavior_ — confirmed live, `TOGGLE_TUTORIAL`'s recovered shape
+(`{tutorialId, isOpen}`) doesn't mean `isOpen` always does what its name
+implies (the reducer silently ignores it unless `tutorialId` matches the
+currently-open one) — so verify with a state read before/after your first
+real dispatch of anything newly discovered, the same way you'd sanity-check
+any of tiers (1)–(4) missing from the hint maps.
 
 `vortex_query` stays genuinely read-only (two modes, `selector`/`path` —
 neither can mutate anything), so it keeps working with no token at all;
@@ -215,8 +244,8 @@ invoked, which this dispatcher never does.
 ### When reflection genuinely can't reach something
 
 Every hand-written tool and fallback tier above exists because reflection
-alone can't express it — but they fall into two different categories, and
-telling them apart matters for where the fix belongs:
+alone can't express it — but they fall into three different categories,
+and telling them apart matters for where the fix belongs:
 
 1. **A real join or bit of orchestration reflection can't do in one call**
    (`list_mods`, `clone_profile`, `launch_game`, `check_nexus_mod_updates`
@@ -224,21 +253,25 @@ telling them apart matters for where the fix belongs:
    published `@nexusmods/vortex-api`; the tool just does more than one
    generic call's worth of work. This is a vortex-mcp-side tool, and stays
    one.
-2. **The published API genuinely doesn't expose the capability at all** —
-   not "reflection is clumsy here," but "there is no `actions`/`api.ext`/
-   event/apiMethod name to dispatch, published or not." The Vortex "files
+2. **A real Redux action exists, just not published through
+   `@nexusmods/vortex-api`** — the common case for anything defined inside
+   an extension's own module rather than Vortex core (`SET_PLUGIN_ENABLED`
+   above; 79 of 81 extension-internal action creators on one real install,
+   confirmed live). This used to be indistinguishable from case 3 below —
+   "no name to dispatch" either way — until `scan_extension_actions` +
+   tier (5) closed it generically: no vortex-mcp code change needed per
+   action, it's discovered live from whatever's actually installed.
+3. **The capability isn't a plain Redux action at all** — genuinely
+   nothing for tier (5) to dispatch, published or not. The Vortex "files
    changed outside Vortex" deploy-blocking dialog is the concrete case
    that surfaced this: it isn't built on the generic `addDialog` system
-   `list_dialogs` reads, and the action creators that resolve it
-   (`setExternalChangeAction`, `confirmExternalChanges`) live in Vortex
-   core's `mod_management` extension, never exported through
-   `@nexusmods/vortex-api`. Worse, resolving it isn't even a pure Redux
+   `list_dialogs` reads, and resolving it isn't even a pure Redux
    action — `confirmExternalChanges` resolves a private in-memory Promise
    captured in a module-scope closure the moment the dialog opened, so no
    amount of raw `{type, payload}` dispatching from outside that module
    could ever unblock the deploy waiting on it.
 
-   For case 2, the fix does **not** belong in vortex-mcp — there's nothing
+   For case 3, the fix does **not** belong in vortex-mcp — there's nothing
    here to hand-write around a capability the API doesn't have. It belongs
    in Vortex core itself, as a `context.registerAPI(...)` addition (same
    pattern as `restartVortex`'s `window.api.app.relaunch`: reaching a real
@@ -377,13 +410,10 @@ alone, is what stops a DNS-rebinding page from reaching the server as
 same-origin.
 
 **Writes fail closed on `VORTEX_MCP_TOKEN`.** With no token set, only the
-read tools (`vortex_describe`, `vortex_query`, `list_mods`, `list_load_order`,
-`list_categories`, `list_downloads`, `list_notifications`, `list_mod_rules`,
-`find_mod_by_file`, `list_file_conflicts`, `find_missing_masters`,
-`list_runtime_errors`, `list_duplicate_mods`, `list_known_mod_conflicts`,
-`find_missing_deployed_files`, `check_nexus_mod_updates`,
-`list_dialogs`) are ever registered
-— none of the eight write tools
+read tools — every tool marked `read` in the [Tools](#tools) table above,
+generated from the live server so it can't drift the way a second
+hand-typed list here would — are ever registered; none of the eight write
+tools
 (`switch_profile`, `clone_profile`, `vortex_dispatch`, `poll_listener`,
 `backup_state`, `set_mods_enabled`, `launch_game`, `vortex_restart`) exist
 to call. Set `VORTEX_MCP_TOKEN` to
@@ -427,6 +457,23 @@ restriction the token lifts. `vortex_dispatch` can still _write_ new
 credentials (`setUserAPIKey`, `nexusRequestNexusLogin`, …) — same as a
 human re-entering their key in Vortex's settings page — the boundary is
 specifically on reading one back out.
+
+**Writes can optionally guard against a stale assumption about what's
+currently active.** This surfaced from a real incident, not a
+hypothetical: switching to a large profile, doing an extended read-only
+analysis assuming it stayed active, then discovering — only by noticing a
+suspiciously small result from an unrelated tool — that the active
+profile had silently reverted to a different one partway through, with no
+error or notification from anything here. `switch_profile`,
+`set_mods_enabled`, `launch_game`, and `vortex_dispatch` all accept
+optional `expectedActiveProfileId`/`expectedActiveGameId` params; when
+set, the write throws immediately — before touching anything — if the
+live active profile/game no longer matches what the caller last observed,
+instead of silently proceeding against whatever's active now. Opt-in and
+additive: omit them and behavior is unchanged. Deliberately doesn't try
+to attribute _who_ changed the context (the user's own Vortex UI, another
+agent, a health check) — Vortex's own log doesn't record that either —
+it only lets a caller assert their own earlier observation still holds.
 
 ## License
 
