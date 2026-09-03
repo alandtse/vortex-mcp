@@ -102,7 +102,12 @@ function fakeApi(
       getState: () => ({}),
       dispatch: overrides.dispatch ?? vi.fn(),
     },
-    events: { emit: overrides.emit ?? vi.fn(), on: vi.fn(), eventNames: vi.fn(() => []) },
+    events: {
+      emit: overrides.emit ?? vi.fn(),
+      on: vi.fn(),
+      eventNames: vi.fn(() => []),
+      listenerCount: vi.fn(() => 1),
+    },
   } as never;
 }
 
@@ -2530,7 +2535,7 @@ describe("vortexControl: checkNexusModUpdates", () => {
     expect(result).toEqual({ checkedCount: 2, updatedModIds: [], eligibleCount: 3 });
   });
 
-  it("applies no limit when modIds is given explicitly", async () => {
+  it("applies limit to an explicit modIds list too (same timeout risk either way)", async () => {
     vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
     const nexusCheckModsVersion = vi.fn(
       async (_gameId: string, _mods: unknown[], _forceFull: boolean) => [] as string[],
@@ -2551,8 +2556,8 @@ describe("vortexControl: checkNexusModUpdates", () => {
 
     const result = await checkNexusModUpdates(api, undefined, ["modA", "modB", "modC"], 2);
 
-    expect(nexusCheckModsVersion.mock.calls[0][1]).toHaveLength(3);
-    expect(result.checkedCount).toBe(3);
+    expect(nexusCheckModsVersion.mock.calls[0][1]).toHaveLength(2);
+    expect(result).toEqual({ checkedCount: 2, updatedModIds: [], eligibleCount: 3 });
   });
 });
 

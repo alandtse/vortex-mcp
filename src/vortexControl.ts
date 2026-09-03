@@ -787,7 +787,6 @@ const UNRECOGNIZED_SHAPE: PayloadShape = {
   noPayload: false,
 };
 
-/** Recovers a PayloadShape from a prepare-function's source text, when its shape matches a recognized pattern. An unrecognized shape returns UNRECOGNIZED_SHAPE — still leaves the type string itself usable. */
 // Extracts {key: paramIndex} from an object literal's inner text (no surrounding braces),
 // resolving each entry's value against the creator's own parameter list. Shared by both
 // the direct-return and null-guarded-ternary shapes in parsePrepareFnShape below.
@@ -816,6 +815,11 @@ function extractPayloadKeysFromObjectBody(
   return payloadKeys;
 }
 
+/**
+ * Recovers a PayloadShape from a prepare-function's source text, when its shape matches
+ * a recognized pattern. An unrecognized shape returns UNRECOGNIZED_SHAPE — still leaves
+ * the type string itself usable.
+ */
 function parsePrepareFnShape(fnText: string): PayloadShape {
   const arrowSplit = /^\(?([^)=]*)\)?\s*=>\s*([\s\S]*)$/.exec(fnText);
   if (arrowSplit === null) {
@@ -825,12 +829,20 @@ function parsePrepareFnShape(fnText: string): PayloadShape {
   const paramIndex = new Map(params.map((p, idx) => [p, idx]));
   let body = arrowSplit[2].trim();
 
-  // Strip a `guard === void 0 ? void 0 : <rest>` null-check wrapper before matching the
-  // object-literal case below -- found live (SET_EDIT_MOD_CYCLE): the real recoverable
-  // shape is the ternary's else-branch, the guard just means the creator also tolerates
-  // being called with its first argument undefined (there's nothing meaningful to record
-  // about that in PayloadShape; the else-branch shape is what matters for a real call).
-  const guardMatch = /^[a-zA-Z_$][\w$]*\s*===\s*void 0\s*\?\s*void 0\s*:\s*([\s\S]*)$/.exec(body);
+  // Strip an `undefined`-check ternary wrapper before matching the object-literal case
+  // below -- found live (SET_EDIT_MOD_CYCLE): the real recoverable shape is the ternary's
+  // else-branch, the guard just means the creator also tolerates being called with its
+  // first argument undefined (there's nothing meaningful to record about that in
+  // PayloadShape; the else-branch shape is what matters for a real call). Matches both
+  // operand orders and both undefined spellings a minifier or a hand-written creator
+  // might produce: `x === void 0 ? void 0 : rest`, `void 0 === x ? void 0 : rest`, and
+  // the `== null` / `undefined` variants.
+  const ID = "[a-zA-Z_$][\\w$]*";
+  const UNDEF = "(?:void 0|undefined)";
+  const guardMatch = new RegExp(
+    `^(?:${ID}\\s*===?\\s*${UNDEF}|${UNDEF}\\s*===?\\s*${ID}|${ID}\\s*==\\s*null)` +
+      `\\s*\\?\\s*${UNDEF}\\s*:\\s*([\\s\\S]*)$`,
+  ).exec(body);
   if (guardMatch) {
     body = guardMatch[1].trim();
   }
@@ -922,7 +934,12 @@ export async function scanExtensionActions(
   if (!forceRefresh && cachedDiscoveredActions !== undefined) {
     return cachedDiscoveredActions;
   }
-  const results: DiscoveredAction[] = [];
+  // extensionScanRoots() is ordered bundled-first, user-plugins-last, which is also
+  // Vortex's own load precedence for a same-name extension in both locations (a
+  // user-installed update shadows the bundled copy). Keyed by extensionName so a later
+  // root's actions for that name replace an earlier root's, instead of both ending up in
+  // the result as an unresolvable duplicate.
+  const byExtension = new Map<string, DiscoveredAction[]>();
   for (const root of extensionScanRoots()) {
     let extensionDirs: string[];
     try {
@@ -952,9 +969,10 @@ export async function scanExtensionActions(
       if (text === undefined) {
         continue; // neither entry filename exists here -- not a JS-bundled extension
       }
-      results.push(...scanFileForActions(text, extensionName));
+      byExtension.set(extensionName, scanFileForActions(text, extensionName));
     }
   }
+  const results = [...byExtension.values()].flat();
   cachedDiscoveredActions = results;
   return results;
 }
@@ -1253,6 +1271,13 @@ export interface PluginDetail {
   dirty?: boolean;
 }
 
+// load order and session.plugins.pluginList both live at a single global (active-game)
+// state path with no per-game keying — there's no way to read either for a non-active
+// game, so a gameId that doesn't match the active one is rejected rather than silently
+// merging that game's LOOT data with the active game's load order/plugin records.
+const MAX_PLUGIN_DETAILS_BATCH = 25;
+const PLUGIN_DETAILS_TIMEOUT_MS = 30_000;
+
 /**
  * Fetches the same rich per-plugin info Vortex's own Plugins tab shows — master list,
  * LOOT messages/warnings, dirty-edit status, group, version — by triggering the SAME
@@ -1264,18 +1289,32 @@ export interface PluginDetail {
  * argument — not the (err, result?) convention that mechanism assumes; using it
  * generically silently misinterprets the real result object as an error (surfaced as a
  * baffling "[object Object]" failure with no other explanation). This function talks to
- * the event directly with the correct single-argument contract instead. A real,
- * potentially slow LOOT call (loads the current load order, may hit the LOOT masterlist)
- * — requires explicit pluginNames, don't request an entire large modlist in one go
- * (mirrors check_nexus_mod_updates' own unscoped-timeout lesson).
+ * the event directly with the correct single-argument contract instead. Capped at
+ * MAX_PLUGIN_DETAILS_BATCH plugins and PLUGIN_DETAILS_TIMEOUT_MS per call — a real,
+ * potentially slow LOOT call (loads the current load order, may hit the LOOT
+ * masterlist) — pass a subset and make repeat calls for a full modlist.
  */
 export async function getPluginDetails(
   api: IExtensionApi,
   pluginNames: string[],
   gameId?: string,
 ): Promise<PluginDetail[]> {
+  if (pluginNames.length > MAX_PLUGIN_DETAILS_BATCH) {
+    throw new Error(
+      `Requested ${pluginNames.length} plugins, max ${MAX_PLUGIN_DETAILS_BATCH} per call ` +
+        "— split into multiple calls.",
+    );
+  }
   const st = state(api);
   const targetGameId = resolveGameId(gameId, st);
+  const activeGameId = selectors.activeGameId(st);
+  if (targetGameId !== activeGameId) {
+    throw new Error(
+      `getPluginDetails only supports the active game (${String(activeGameId)}) — load ` +
+        `order and plugin state have no per-game storage for an inactive game. Switch ` +
+        `profile/game to "${targetGameId}" first.`,
+    );
+  }
   const loadOrder = listLoadOrder(api);
   const loadOrderByPlugin = new Map(loadOrder.map((entry) => [entry.plugin.toLowerCase(), entry]));
   const pluginList =
@@ -1289,12 +1328,26 @@ export async function getPluginDetails(
     group?: string;
     version?: string;
   };
+  if (api.events.listenerCount("plugin-details") === 0) {
+    throw new Error(
+      'No listener registered for the "plugin-details" event — the extension that ' +
+        "provides plugin details (e.g. gamebryo-plugin-management) isn't loaded for " +
+        `"${targetGameId}".`,
+    );
+  }
   const lootInfo = await new Promise<Record<string, LootPluginInfo>>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new Error(`Timed out waiting for "plugin-details" after ${PLUGIN_DETAILS_TIMEOUT_MS}ms`),
+      );
+    }, PLUGIN_DETAILS_TIMEOUT_MS);
     try {
       api.events.emit("plugin-details", targetGameId, pluginNames, (result: unknown) => {
+        clearTimeout(timer);
         resolve((result ?? {}) as Record<string, LootPluginInfo>);
       });
     } catch (err) {
+      clearTimeout(timer);
       reject(err instanceof Error ? err : new Error(String(err)));
     }
   });
@@ -2738,9 +2791,10 @@ const DEFAULT_UPDATE_CHECK_LIMIT = 25;
  * Checks installed Nexus-sourced mods for available updates via Vortex's own built-in
  * integration and the user's existing Vortex login — no separate API key. Defaults to
  * the first `limit` (25) installed mods with source "nexus"; pass modIds to check a
- * specific subset instead (no limit applied when modIds is given explicitly — the
- * caller already knows exactly what they're asking for). Consumes the user's real Nexus
- * API request quota — don't call this in a loop.
+ * specific subset instead. `limit` still applies to an explicit modIds list — the same
+ * per-mod network call causes the same timeout risk regardless of who picked the ids —
+ * so pass the remaining ids in a follow-up call to cover the rest. Consumes the user's
+ * real Nexus API request quota — don't call this in a loop.
  */
 export async function checkNexusModUpdates(
   api: IExtensionApi,
@@ -2757,7 +2811,7 @@ export async function checkNexusModUpdates(
       mod !== undefined && (mod.attributes as { source?: string } | undefined)?.source === "nexus"
     );
   });
-  const cappedIds = modIds !== undefined ? eligibleIds : eligibleIds.slice(0, limit);
+  const cappedIds = eligibleIds.slice(0, limit);
   const targetMods = cappedIds.map((id) => mods[id]);
   const fn = getExtensionApi<
     (gameId: string, mods: IMod[], forceFull?: boolean) => Promise<string[]>

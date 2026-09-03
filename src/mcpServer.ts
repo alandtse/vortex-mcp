@@ -122,6 +122,16 @@ function makeJsonText(api: IExtensionApi): (value: unknown) => { type: "text"; t
 }
 
 function registerReadTools(server: McpServer, api: IExtensionApi): void {
+  registerDiscoveryTools(server, api);
+  registerModInventoryTools(server, api);
+  registerDownloadAndRuleTools(server, api);
+  registerDiagnosticTools(server, api);
+  registerDialogTools(server, api);
+}
+
+// Split from one large registerReadTools by domain — vortex_describe/scan_extension_actions/
+// vortex_query all discover *what's callable* rather than reading specific game state.
+function registerDiscoveryTools(server: McpServer, api: IExtensionApi): void {
   const jsonText = makeJsonText(api);
   server.registerTool(
     "vortex_describe",
@@ -236,7 +246,11 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
       throw new Error("Provide either `selector` or `path`.");
     },
   );
+}
 
+// Mod/plugin/profile inventory reads.
+function registerModInventoryTools(server: McpServer, api: IExtensionApi): void {
+  const jsonText = makeJsonText(api);
   server.registerTool(
     "list_profiles",
     {
@@ -303,13 +317,18 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
         "triggering the SAME real LOOT lookup the UI panel and the LOOT-sort mechanism " +
         "both use, merged with load order (index/enabled) and the base record Vortex " +
         "already caches (modId, deployed, isNative). list_load_order alone only gives " +
-        "you index/enabled — this is the rest of what the tab surfaces. A real, " +
-        "potentially slow LOOT call (loads the current load order, may touch the LOOT " +
-        "masterlist) — pass specific plugin names, don't request an entire large " +
-        "modlist in one go. `messages` is opaque (from the `loot` native package, not " +
-        "vendored here) — read fields as found rather than assuming a schema.",
+        "you index/enabled — this is the rest of what the tab surfaces. Only supports " +
+        "the active game (load order and plugin state have no per-game storage for an " +
+        "inactive game). A real, potentially slow LOOT call — capped at 25 plugins and " +
+        "30s per call, pass a subset and make repeat calls for a full modlist. " +
+        "`messages` is opaque (from the `loot` native package, not vendored here) — read " +
+        "fields as found rather than assuming a schema.",
       inputSchema: z.object({
-        pluginNames: z.array(z.string()).min(1).describe("Plugin file names to fetch details for"),
+        pluginNames: z
+          .array(z.string())
+          .min(1)
+          .max(25)
+          .describe("Plugin file names to fetch details for; max 25 per call"),
         gameId: z.string().optional().describe("Game id; defaults to the active game"),
       }),
     },
@@ -332,7 +351,11 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
       content: [jsonText(control.listCategories(api, gameId))],
     }),
   );
+}
 
+// Downloads and mod-rule/conflict-linkage reads.
+function registerDownloadAndRuleTools(server: McpServer, api: IExtensionApi): void {
+  const jsonText = makeJsonText(api);
   server.registerTool(
     "list_downloads",
     {
@@ -507,7 +530,12 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
       content: [jsonText(await control.listFileConflicts(api, { gameId, nameFilter, limit }))],
     }),
   );
+}
 
+// Health/diagnostic reads — missing masters, runtime errors, duplicate/stale/conflicting
+// mods, orphaned files, Nexus update checks.
+function registerDiagnosticTools(server: McpServer, api: IExtensionApi): void {
+  const jsonText = makeJsonText(api);
   server.registerTool(
     "find_missing_masters",
     {
@@ -704,12 +732,13 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
         "sourced ones before calling the underlying api.ext function. Makes one real, " +
         "rate-limited network call per mod through Vortex's own nexusCheckModsVersion — " +
         "confirmed live to exceed a 300s MCP call timeout well before covering even a " +
-        "modest (~50 mod) list, so the default (no modIds) form caps itself at `limit` " +
-        "(25) mods rather than trying everything and timing out with no partial results. " +
-        "Check the result's eligibleCount vs checkedCount: if eligibleCount is higher, " +
-        "there's more to check — pass the remaining mod ids explicitly (via modIds, no " +
-        "limit applied when you do) in a follow-up call to cover the rest in batches. " +
-        "Consumes the user's real Nexus API request quota — don't call this in a loop.",
+        "modest (~50 mod) list, so every call caps itself at `limit` (25) mods rather " +
+        "than trying everything and timing out with no partial results — this applies " +
+        "even when you pass modIds explicitly, since the timeout risk is the same either " +
+        "way. Check the result's eligibleCount vs checkedCount: if eligibleCount is " +
+        "higher, there's more to check — pass the remaining mod ids explicitly in a " +
+        "follow-up call to cover the rest in batches. Consumes the user's real Nexus API " +
+        "request quota — don't call this in a loop.",
       inputSchema: z.object({
         gameId: z.string().optional().describe("Game id; defaults to the active game"),
         modIds: z
@@ -717,21 +746,25 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
           .optional()
           .describe(
             "Vortex mod ids to check; defaults to the first `limit` installed Nexus-" +
-              "sourced mods. No limit applied when you pass this explicitly.",
+              "sourced mods. `limit` still applies when you pass this explicitly.",
           ),
         limit: z
           .number()
           .int()
           .positive()
           .optional()
-          .describe("Cap on how many mods to check when modIds is omitted; default 25"),
+          .describe("Cap on how many mods to check per call; default 25"),
       }),
     },
     async ({ gameId, modIds, limit }) => ({
       content: [jsonText(await control.checkNexusModUpdates(api, gameId, modIds, limit))],
     }),
   );
+}
 
+// Vortex's own dialog/external-change UI state.
+function registerDialogTools(server: McpServer, api: IExtensionApi): void {
+  const jsonText = makeJsonText(api);
   server.registerTool(
     "list_dialogs",
     {
