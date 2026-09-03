@@ -737,10 +737,11 @@ async function writeExtensionBundle(
   root: string,
   extensionName: string,
   text: string,
+  entryFile: "index.cjs" | "index.js" = "index.cjs",
 ): Promise<void> {
   const dir = path.join(root, extensionName);
   await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, "index.cjs"), text);
+  await writeFile(path.join(dir, entryFile), text);
 }
 
 describe("vortexControl: scanExtensionActions", () => {
@@ -897,13 +898,42 @@ describe("vortexControl: scanExtensionActions", () => {
     expect(result.map((r) => r.type).toSorted()).toEqual(["BUILTIN_TYPE", "USER_TYPE"]);
   });
 
-  it("skips an extension directory with no index.cjs rather than throwing", async () => {
+  it("skips an extension directory with neither index.cjs nor index.js rather than throwing", async () => {
     await mkdir(path.join(bundledRoot, "no-bundle-here"), { recursive: true });
     await writeExtensionBundle(bundledRoot, "real-ext", "(0,g.createAction)(`REAL_TYPE`,e=>e);");
 
     const result = await scanExtensionActions(fakeApi(), true);
 
     expect(result.map((r) => r.type)).toEqual(["REAL_TYPE"]);
+  });
+
+  it("falls back to index.js when index.cjs doesn't exist", async () => {
+    // Found live: entry filename isn't uniform -- 70 of 132 bundled extensions on a
+    // real install ship index.js instead of index.cjs, and EVERY user-installed/
+    // third-party extension on that same install used index.js exclusively (a real
+    // Starfield extension had 6 createAction sites this project was silently missing
+    // before this fallback was added).
+    await writeExtensionBundle(
+      bundledRoot,
+      "js-only-ext",
+      "(0,g.createAction)(`JS_ENTRY_TYPE`,e=>e);",
+      "index.js",
+    );
+
+    const result = await scanExtensionActions(fakeApi(), true);
+
+    expect(result.map((r) => r.type)).toEqual(["JS_ENTRY_TYPE"]);
+  });
+
+  it("prefers index.cjs over index.js when both exist in the same extension directory", async () => {
+    const dir = path.join(bundledRoot, "both-ext");
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, "index.cjs"), "(0,g.createAction)(`FROM_CJS`,e=>e);");
+    await writeFile(path.join(dir, "index.js"), "(0,g.createAction)(`FROM_JS`,e=>e);");
+
+    const result = await scanExtensionActions(fakeApi(), true);
+
+    expect(result.map((r) => r.type)).toEqual(["FROM_CJS"]);
   });
 
   it("caches results across calls until forceRefresh is passed", async () => {

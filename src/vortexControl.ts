@@ -926,12 +926,24 @@ export async function scanExtensionActions(
       continue; // root doesn't exist on this install (e.g. no user-installed extensions yet)
     }
     for (const extensionName of extensionDirs) {
-      const entryPath = path.join(root, extensionName, "index.cjs");
-      let text: string;
-      try {
-        text = await readFile(entryPath, "utf8");
-      } catch {
-        continue; // not every extension necessarily bundles to index.cjs; skip rather than guess
+      // Found live: entry filename isn't uniform across this install — 62 of 132
+      // bundled extensions ship index.cjs, the other 70 ship index.js, and (bigger
+      // impact) EVERY user-installed/third-party extension on this machine uses
+      // index.js exclusively, none use .cjs. Checking only one name was silently
+      // skipping the entire third-party extension ecosystem (confirmed live: a
+      // Starfield extension alone had 6 real createAction sites this missed). No
+      // "main" field in info.json to consult instead — these two names are it.
+      let text: string | undefined;
+      for (const entryName of ["index.cjs", "index.js"]) {
+        try {
+          text = await readFile(path.join(root, extensionName, entryName), "utf8");
+          break;
+        } catch {
+          continue;
+        }
+      }
+      if (text === undefined) {
+        continue; // neither entry filename exists here -- not a JS-bundled extension
       }
       results.push(...scanFileForActions(text, extensionName));
     }
