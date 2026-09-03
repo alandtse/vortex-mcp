@@ -905,8 +905,15 @@ let cachedDiscoveredActions: DiscoveredAction[] | undefined;
  * Vortex's TypeScript source checked out anywhere. This is what makes
  * RAW_ACTION_TYPE_PREFIX ("type:") dispatch discoverable on an arbitrary real
  * installation instead of only for the handful of cases this project happened to
- * hand-document by reading source. Cached for the process lifetime (these files only
- * change when Vortex/an extension updates) — pass forceRefresh to re-scan.
+ * hand-document by reading source. Recovers SHAPE only, not reducer BEHAVIOR — confirmed
+ * live two ways: gamebryo-plugin-management's TOGGLE_TUTORIAL silently ignores its own
+ * `isOpen` payload value unless `tutorialId` matches the currently-open one (ground truth
+ * needs a real dispatch + state read, not just this scan), while that same extension's
+ * userlist-family actions (setGroup and siblings) all match plugin names case-
+ * insensitively, confirmed by dispatching a wrong-case pluginId live and observing it
+ * correctly update the existing entry rather than creating a duplicate. Cached for the
+ * process lifetime (these files only change when Vortex/an extension updates) — pass
+ * forceRefresh to re-scan.
  */
 export async function scanExtensionActions(
   api: IExtensionApi,

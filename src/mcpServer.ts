@@ -174,6 +174,22 @@ function registerReadTools(server: McpServer, api: IExtensionApi): void {
         "CONFIRMED shape, not an unknown one). When payloadKeys is empty and both flags " +
         "are false, the type string was recovered but its shape wasn't recognized — " +
         "still more than nothing, but verify the shape yourself before dispatching. " +
+        "IMPORTANT LIMIT: this recovers dispatch SHAPE, not reducer BEHAVIOR — the " +
+        "creator's argument shape and what the reducer actually does with it are two " +
+        "separate pieces of code, only the first is scanned. Confirmed live: gamebryo-" +
+        "plugin-management's TOGGLE_TUTORIAL (shape {tutorialId: 0, isOpen: 1}) silently " +
+        "ignores the isOpen value and forces true whenever tutorialId differs from the " +
+        "currently-open one — dispatching a 'correct-shaped' payload does not guarantee " +
+        "the effect its field names imply. Read state before AND after your first real " +
+        "dispatch of any newly-discovered action to confirm what it actually does, don't " +
+        "trust the shape alone. One reassuring counterpoint, also confirmed live: " +
+        "gamebryo-plugin-management's userlist-related actions (setGroup/addRule/" +
+        "removeRule/addGroup/removeGroup/addGroupRule/removeGroupRule) all match plugin " +
+        "names case-INsensitively when updating an existing entry — exact casing of a " +
+        "pluginId/pluginName argument doesn't matter for those, confirmed by dispatching " +
+        "a deliberately-wrong-case pluginId live and observing it correctly update the " +
+        "existing entry with no duplicate created — but this is specific to that " +
+        "extension's userlist reducers, not a guarantee for every action found here. " +
         "Cached after the first call " +
         "(these files only change when Vortex/an extension updates) — pass forceRefresh " +
         "to re-scan after an update. A real filesystem scan across every installed " +
