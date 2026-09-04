@@ -2,6 +2,6 @@
   "name": "Vortex MCP",
   "id": "vortex-mcp",
   "author": "Alan Tse",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Runs an MCP server inside Vortex so AI agents (Claude, etc.) can control mod installation, deployment, profiles, and load order."
 }
