@@ -3,8 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "description": "Vortex extension exposing an MCP server for programmatic control of Vortex",
+  "homepage": "https://github.com/alandtse/vortex-mcp#readme",
+  "bugs": "https://github.com/alandtse/vortex-mcp/issues",
   "license": "GPL-3.0-only",
   "author": "Alan Tse",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alandtse/vortex-mcp.git"
+  },
   "type": "commonjs",
   "scripts": {
     "build": "tsup",

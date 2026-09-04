@@ -5,16 +5,13 @@
 # dry-run reporting and idempotent re-run check internally, so this wrapper only resolves
 # the release tag/changelog and passes them through.
 #
-# file_group_id has no default and dry-run stays the only mode until it's set. That's not
-# a missing config value, it's two real, sequenced limitations: (1) creating a new Nexus
-# mod page isn't exposed by any API — checked directly against Nexus's own v3 OpenAPI
-# schema and confirmed by BUTR.NexusUploader's own docs — so the page has to be created by
-# hand once on nexusmods.com; (2) even after that, this specific uploader needs an existing
-# file GROUP id, minted by uploading the mod's first file once on the website (Files tab ->
-# "API Info", or the Manage Files edit menu) — it doesn't create the first file either.
-# Once both exist, set file_group_id below (or pass it on manual dispatch) and the
-# NEXUS_AUTO_UPLOAD=true repo variable (plus UNEX_APIKEY) to let release.yml upload every
-# subsequent version automatically.
+# The mod page exists (nexus_mod_id 2263, https://www.nexusmods.com/games/site/mods/2263).
+# file_group_id still has no default and dry-run stays the only mode until it's set: this
+# uploader needs an existing file GROUP id, minted by uploading the mod's first file once by
+# hand on the website (Files tab -> "API Info", or the Manage Files edit menu) — it doesn't
+# create the first file either. Once that's done, set file_group_id below (or pass it on
+# manual dispatch) and the NEXUS_AUTO_UPLOAD=true repo variable (plus UNEX_APIKEY) to let
+# release.yml upload every subsequent version automatically.
 name: "Nexus: Upload Release"
 
 on:
@@ -30,7 +27,7 @@ on:
       nexus_mod_id:
         description: "vortex-mcp Nexus mod ID (only used for the idempotent-reupload check; empty skips that check)."
         required: false
-        default: ""
+        default: "2263"
       file_group_id:
         description: "Nexus file group ID to upload into (empty until minted by hand; required for a real upload)."
         required: false
@@ -60,7 +57,7 @@ on:
       nexus_mod_id:
         required: false
         type: string
-        default: ""
+        default: "2263"
       file_group_id:
         required: false
         type: string

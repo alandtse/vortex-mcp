@@ -6,6 +6,10 @@ Vortex, so an AI agent (Claude, etc.) can list, install, enable/disable,
 deploy, and purge mods, and switch profiles/games — all through one local
 endpoint, no clicking through the UI.
 
+Source: https://github.com/alandtse/vortex-mcp · License:
+[GPL-3.0](LICENSE.md) · Nexus:
+https://www.nexusmods.com/games/site/mods/2263
+
 ## Status
 
 Unit- and integration-tested (real HTTP requests against the actual server,
@@ -53,8 +57,9 @@ Restart Vortex. The MCP server listens on `http://127.0.0.1:3701/mcp`
 copy for local development; `.github/workflows/release.yml` builds a
 versioned zip in the same layout (dist/ + info.json) and attaches it to a
 GitHub Release on every Conventional-Commit-worthy push to `main` (see
-[Release process](#release-process)). No Nexus mod page exists yet — see
-that section.
+[Release process](#release-process)). Nexus mod page:
+https://www.nexusmods.com/games/site/mods/2263 — see that section for
+upload status.
 
 ## Connect an MCP client
 
@@ -388,15 +393,12 @@ nexus-upload.yml` wraps `alandtse/nexus-workflows`'s
 (Nexus v3 API) path, rather than the `BUTR.NexusUploader`/`unex` wrapper
 the sibling FloatingDamageNG/devbench repos still use; it handles its own
 dry-run reporting and idempotent-reupload check internally. Its
-`file_group_id` has no default — dry-run is the only mode until it's set,
-and getting there is two real, sequenced steps, not one missing config
-value: (1) creating a new Nexus mod page isn't exposed by any API —
-checked directly against Nexus's own v3 OpenAPI schema and confirmed by
-`BUTR.NexusUploader`'s own docs — so the page has to be created by hand
-once on nexusmods.com; (2) this specific uploader also needs an existing
-file _group_ id, minted by uploading the mod's first file once on the
-website (Files tab → "API Info", or the Manage Files edit menu) — it
-doesn't create the first file either. Once both exist, set
+The mod page exists (`nexus_mod_id` 2263,
+https://www.nexusmods.com/games/site/mods/2263). `file_group_id` still has
+no default — dry-run is the only mode until it's set: this uploader needs
+an existing file _group_ id, minted by uploading the mod's first file once
+by hand on the website (Files tab → "API Info", or the Manage Files edit
+menu) — it doesn't create the first file either. Once that's done, set
 `file_group_id` in `nexus-upload.yml` and the `NEXUS_AUTO_UPLOAD=true`
 repo variable (plus `UNEX_APIKEY`) to let `release.yml` upload every
 subsequent version automatically.

@@ -1,0 +1,28 @@
+[size=4][b]Description[/b][/size]
+[size=3][color=#D4D4D8]Vortex extension that runs an MCP (Model Context Protocol) server inside Vortex, so an AI agent like Claude can list, install, enable/disable, deploy, and purge mods, and switch profiles/games, all through one local endpoint. No clicking through the UI for every action. Everything it reports comes from Vortex's live running state, not a hand-typed list, so it stays accurate as Vortex and your extensions update.[/color][/size]
+
+[size=4][b]Installation instructions[/b][/size]
+[size=3][color=#D4D4D8]1. Download the zip and add it in Vortex like any other extension (Extensions page, drag the zip in), or unzip it into %APPDATA%\Vortex\plugins\vortex-mcp by hand.
+2. Restart Vortex.
+3. The server listens on http://127.0.0.1:3701/mcp by default (change the port with the VORTEX_MCP_PORT env var). Point your MCP client at it, e.g. for Claude Code: claude mcp add --transport http vortex http://127.0.0.1:3701/mcp
+4. By default only read tools are exposed. Set the VORTEX_MCP_TOKEN env var before starting Vortex if you want write access (install, deploy, switch profile, etc), and pass it as an Authorization: Bearer header from your client.[/color][/size]
+
+[size=4][b]Main features[/b][/size]
+[size=3][color=#D4D4D8]Read tools: mods, profiles, load order, plugin/LOOT details, downloads, categories, notifications, mod rules and conflicts, runtime errors, orphaned/missing files, Nexus update checks, all pulled live.
+
+Write tools (only when a token is set): switch or clone profiles, enable/disable mods, dispatch any Vortex action or api call, launch the game, restart Vortex.
+
+Reflection based discovery: scan_extension_actions reads every installed extension's compiled code on disk to find dispatchable actions Vortex itself doesn't publish through its API, so new/updated extensions are usable without waiting on an update to this tool.
+
+Safety: confidential state (Nexus API key, OAuth tokens) is always redacted from responses, writes can be guarded against acting on a stale profile/game assumption, and the server only binds to localhost with DNS rebinding protection.[/color][/size]
+
+[size=4][b]Requirements[/b][/size]
+[size=3][color=#D4D4D8]Vortex itself. An MCP client that speaks Streamable HTTP, such as Claude Code or Claude Desktop (with the mcp-remote bridge for stdio-only clients), or anything else following the MCP spec.[/color][/size]
+
+[size=4][b]Shout outs[/b][/size]
+[size=3][color=#D4D4D8]Thanks to the Vortex/Nexus Mods team for an extension API open enough to make this possible.[/color][/size]
+
+[size=4][b]Source[/b][/size]
+[size=3][color=#D4D4D8]https://github.com/alandtse/vortex-mcp
+
+Licensed under GPL-3.0.[/color][/size]
