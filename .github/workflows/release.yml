@@ -106,11 +106,13 @@ jobs:
       # exists, so a failed build/package leaves a hidden draft instead of a
       # download-less tag.
       - name: Attach archive and publish release
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.semantic-release.outputs.new_release_git_tag }}
           ARCHIVE: ${{ steps.pkg.outputs.archive }}
         run: |
+          set -euo pipefail
           gh release upload "$TAG" "$ARCHIVE" --clobber
           gh release edit "$TAG" --draft=false
 
