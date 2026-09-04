@@ -387,20 +387,18 @@ rearranging), attaches it to the release, and promotes the release out of
 draft — only after the asset exists, so a failed build leaves a hidden
 draft instead of a download-less tag.
 
-**Nexus upload has no mod page to upload to yet.** `.github/workflows/
-nexus-upload.yml` wraps `alandtse/nexus-workflows`'s
-`upload-nexus-official.yml` — the official `Nexus-Mods/upload-action`
-(Nexus v3 API) path, rather than the `BUTR.NexusUploader`/`unex` wrapper
-the sibling FloatingDamageNG/devbench repos still use; it handles its own
-dry-run reporting and idempotent-reupload check internally. Its
-The mod page exists (`nexus_mod_id` 2263,
-https://www.nexusmods.com/games/site/mods/2263). `file_group_id` still has
-no default — dry-run is the only mode until it's set: this uploader needs
-an existing file _group_ id, minted by uploading the mod's first file once
-by hand on the website (Files tab → "API Info", or the Manage Files edit
-menu) — it doesn't create the first file either. Once that's done, set
-`file_group_id` in `nexus-upload.yml` and the `NEXUS_AUTO_UPLOAD=true`
-repo variable (plus `UNEX_APIKEY`) to let `release.yml` upload every
+**Nexus upload has a mod page and file group, but auto-upload is off by
+default.** `.github/workflows/nexus-upload.yml` wraps
+`alandtse/nexus-workflows`'s `upload-nexus-official.yml` — the official
+`Nexus-Mods/upload-action` (Nexus v3 API) path, rather than the
+`BUTR.NexusUploader`/`unex` wrapper the sibling FloatingDamageNG/devbench
+repos still use; it handles its own dry-run reporting and
+idempotent-reupload check internally. The mod page exists (`nexus_mod_id`
+2263, https://www.nexusmods.com/games/site/mods/2263) and
+`file_group_id` (7907967, minted by uploading the mod's first file by
+hand on the website) is set as the workflow's default. Dry-run still
+stays the only mode until the `NEXUS_AUTO_UPLOAD=true` repo variable
+(plus `UNEX_APIKEY`) is set, letting `release.yml` upload every
 subsequent version automatically.
 
 ## Safety

@@ -5,13 +5,11 @@
 # dry-run reporting and idempotent re-run check internally, so this wrapper only resolves
 # the release tag/changelog and passes them through.
 #
-# The mod page exists (nexus_mod_id 2263, https://www.nexusmods.com/games/site/mods/2263).
-# file_group_id still has no default and dry-run stays the only mode until it's set: this
-# uploader needs an existing file GROUP id, minted by uploading the mod's first file once by
-# hand on the website (Files tab -> "API Info", or the Manage Files edit menu) — it doesn't
-# create the first file either. Once that's done, set file_group_id below (or pass it on
-# manual dispatch) and the NEXUS_AUTO_UPLOAD=true repo variable (plus UNEX_APIKEY) to let
-# release.yml upload every subsequent version automatically.
+# The mod page exists (nexus_mod_id 2263, https://www.nexusmods.com/games/site/mods/2263)
+# and file_group_id (7907967) was minted by uploading the mod's first file by hand on the
+# website. dry-run still stays the only mode until the NEXUS_AUTO_UPLOAD=true repo variable
+# (plus UNEX_APIKEY) is set, letting release.yml upload every subsequent version
+# automatically.
 name: "Nexus: Upload Release"
 
 on:
@@ -31,7 +29,7 @@ on:
       file_group_id:
         description: "Nexus file group ID to upload into (empty until minted by hand; required for a real upload)."
         required: false
-        default: ""
+        default: "7907967"
       mod_filename:
         description: "Display name for the uploaded file."
         required: false
@@ -61,7 +59,7 @@ on:
       file_group_id:
         required: false
         type: string
-        default: ""
+        default: "7907967"
       mod_filename:
         required: false
         type: string
