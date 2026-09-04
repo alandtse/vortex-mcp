@@ -12,26 +12,15 @@ https://www.nexusmods.com/games/site/mods/2263
 
 ## Status
 
-Unit- and integration-tested (real HTTP requests against the actual server,
-real Host/Origin/token gating, real MCP `initialize` handshake) — see
-`pnpm run test`. Every read tool, and `vortex_dispatch` across all five of
-its fallback tiers (action creator, api.ext function, event — both
-fire-and-forget and `"__CALLBACK__"`-awaited, e.g.
-`action="deploy-mods", args=["__CALLBACK__"]` — direct api method,
-including the listener-registering subset paired with `poll_listener` —
-registered `onStateChange` against a real state path, triggered two real
-firings via `setAdvancedMode`, and confirmed `poll_listener` returned both
-in order, non-destructively, with `since` correctly filtering to only
-what's new; and the raw `"type:<TYPE>"` fallback, paired with
-`scan_extension_actions`), has been live-verified against a real Vortex
-install against a disposable test profile, with a `backup_state` snapshot
-taken before starting. `launch_game` was live-verified end to end —
-deploy, launch, confirmed the real game process came up — with explicit
-confirmation first, since unlike everything else here it has a visible
-real-world side effect. The `start-download` event (installing a mod from
-a URL) is deliberately never exercised outside unit tests — it can
-trigger a blocking "choose install type" modal for ambiguous archives,
-unsafe to risk unsupervised.
+Unit- and integration-tested — see `pnpm run test`. Every read tool and
+every `vortex_dispatch` fallback tier has been verified against a real
+Vortex install on a disposable test profile, with a `backup_state` snapshot
+taken first. `launch_game` was verified end to end (deploy, launch, real
+game process came up) since unlike everything else here it has a visible
+real-world side effect. The `start-download` event (installing a mod from a
+URL) is never exercised outside unit tests — it can trigger a blocking
+"choose install type" modal for ambiguous archives, unsafe to risk
+unsupervised.
 
 ## Stack
 
@@ -55,11 +44,9 @@ pnpm run install-plugin   # copy dist/ + info.json into %APPDATA%\vortex\plugins
 Restart Vortex. The MCP server listens on `http://127.0.0.1:3701/mcp`
 (override with `VORTEX_MCP_PORT`). `install-plugin` is a straight directory
 copy for local development; `.github/workflows/release.yml` builds a
-versioned zip in the same layout (dist/ + info.json) and attaches it to a
-GitHub Release on every Conventional-Commit-worthy push to `main` (see
-[Release process](#release-process)). Nexus mod page:
-https://www.nexusmods.com/games/site/mods/2263 — see that section for
-upload status.
+versioned zip in the same layout and attaches it to a GitHub Release on
+every Conventional-Commit-worthy push to `main` (see
+[Release process](#release-process)).
 
 ## Connect an MCP client
 
@@ -130,221 +117,131 @@ hand-transcribed, so it can't silently drift from the code.
 
 <!-- TOOLS_TABLE_END -->
 
-`vortex_describe`/`vortex_query` deliberately replace the old one-tool-per-
-selector design (`list_profiles`, `get_active_profile`) — an
-[agentic-renderdoc](https://github.com/EdenLabs/agentic-renderdoc#why-this-design)-style
-choice: fewer, richer read primitives over reflection on the live
+`vortex_describe`/`vortex_query` replace one-tool-per-selector design in
+favor of fewer, richer read primitives over reflection on the live
 `@nexusmods/vortex-api` namespace, rather than a named MCP tool (and a
 rebuild) per selector. `list_mods` stays hand-written because it performs a
 real join (mod ↔ profile enabled-state, friendly name via `renderModName`)
 that reflection can't do in one call.
 
-`vortex_dispatch` extends the same reflection principle to writes, trying
-five fallback tiers in order by name: (1) a Redux `actions` creator, (2) a
-same-named `api.ext.*` function (Vortex's own built-in Nexus Mods
-integration, plus anything a third-party extension registers the same
-way), (3) a currently-registered event name, emitted via `api.events.emit`
-— fire-and-forget by default, or awaited to real completion (not just
-"started") when the caller passes a `"__CALLBACK__"` sentinel at the
+`vortex_dispatch` extends the same principle to writes, trying five
+fallback tiers in order by name: (1) a Redux `actions` creator, (2) a
+same-named `api.ext.*` function, (3) a currently-registered event name via
+`api.events.emit` — fire-and-forget by default, or awaited to real
+completion when the caller passes a `"__CALLBACK__"` sentinel at the
 position Vortex's own handler expects a Node-style `(err, result?) => void`
-callback (e.g. `action="deploy-mods", args=["__CALLBACK__"]`), (4) a
-direct method on the `api` object itself (e.g. `translate`,
-`sendNotification`, `runExecutable`), and (5) a literal `"type:<TYPE>"`
-prefix, dispatching a raw `{type, payload}` Redux action directly —
-`payload` is `args[0]` verbatim, bypassing tier (1)'s named-creator lookup
-entirely. None of the five tiers is
-allowlisted. The security boundary is the loopback bind + bearer token
-(see [Safety](#safety)) — once an operator holds the token they already
-have "full write privileges" per this project's own model, matching what a
-human at Vortex's own UI can already do (change game paths, manage
-extensions/credentials, delete profiles, deploy/purge mods). An earlier
-version gated this behind a hand-curated allowlist excluding "admin-level"
-actions — removed deliberately: it didn't protect against a meaningfully
-different threat than the token already does, it blocked the trusted case
-(an agent acting on the operator's own behalf) for no real gain, and it
-required manual upkeep for every new safe Vortex action or event.
+callback (e.g. `action="deploy-mods", args=["__CALLBACK__"]`), (4) a direct
+method on the `api` object itself (e.g. `translate`, `sendNotification`,
+`runExecutable`), and (5) a literal `"type:<TYPE>"` prefix, dispatching a
+raw `{type, payload}` Redux action directly. None of the five tiers is
+allowlisted — the security boundary is the loopback bind + bearer token
+(see [Safety](#safety)); once an operator holds the token they already have
+full write privileges, matching what a human at Vortex's own UI can do.
 `ACTION_HINTS`/`EXTENSION_API_HINTS`/`EVENT_HINTS` in `vortexControl.ts`
-still exist, but purely as documentation now — real positional argument
-order (including the `"__CALLBACK__"` position) for the subset this
-project has verified, surfaced via `vortex_describe`'s `dispatchHints`/
-`extensionApiHints`/`eventHints` so a caller doesn't need to go read source
-first. An action, `api.ext` function, event, or api method missing from
-these maps still dispatches fine; you just don't get a pre-verified
+document real positional argument order for the subset this project has
+verified, surfaced via `vortex_describe`'s `dispatchHints`/
+`extensionApiHints`/`eventHints`. An action/function/event/method missing
+from these maps still dispatches fine; you just don't get a pre-verified
 argument order.
 
-Tier (5) exists because most action creators defined _inside_ an
-extension's own module (as opposed to Vortex core) — e.g.
-`gamebryo-plugin-management`'s `SET_PLUGIN_ENABLED`, the actual per-PLUGIN
-enable toggle, distinct from the mod-level `set_mods_enabled` — are never
-re-exported through the published `@nexusmods/vortex-api` package tier (1)
-depends on, so they're invisible to `vortex_describe`'s `actions` list
-entirely (confirmed live: 79 of 81 across one real install's extensions).
+Most action creators defined _inside_ an extension's own module (as opposed
+to Vortex core) are never re-exported through `@nexusmods/vortex-api`, so
+they're invisible to `vortex_describe`'s `actions` list entirely.
 `scan_extension_actions` closes that gap by scanning every installed
-extension's own compiled JS on disk (bundled + user-installed — both
-plain files, no source checkout or `app.asar` archive parsing needed) for
-`createAction(TYPE, prepareFn)` call sites, recovering the real type
-string and, from the prepare-function's own source text, its payload
-shape (key names _and_ argument order survive minification even when
-parameter names get mangled, since a minifier can't rewrite an object
-literal's keys without breaking the payload contract). This is what makes
-tier (5) genuinely usable rather than just a raw escape hatch: a live
-scan on this install recovers a usable shape for 100% of real actions
-found, not just the type string. It's shape only, not reducer
-_behavior_ — confirmed live, `TOGGLE_TUTORIAL`'s recovered shape
-(`{tutorialId, isOpen}`) doesn't mean `isOpen` always does what its name
-implies (the reducer silently ignores it unless `tutorialId` matches the
-currently-open one) — so verify with a state read before/after your first
-real dispatch of anything newly discovered, the same way you'd sanity-check
-any of tiers (1)–(4) missing from the hint maps.
+extension's own compiled JS on disk (bundled + user-installed, both plain
+files) for `createAction(TYPE, prepareFn)` call sites, recovering the real
+type string and the prepare-function's payload shape — key names and
+argument order survive minification even when parameter names get mangled,
+since a minifier can't rewrite an object literal's keys without breaking
+the payload contract. This is shape only, not reducer _behavior_: a
+recovered shape like `{tutorialId, isOpen}` doesn't guarantee a field
+always does what its name implies — verify with a state read before/after
+your first real dispatch of anything newly discovered.
 
-`vortex_query` stays genuinely read-only (two modes, `selector`/`path` —
-neither can mutate anything), so it keeps working with no token at all;
-`api.ext` calls moved to `vortex_dispatch` instead, since they can have
-side effects. `check_nexus_mod_updates` stayed a dedicated write tool
-(rather than folding into `vortex_dispatch` like `get_nexus_mod_info` did)
-because it does a real join no generic dispatcher can do in one call
-(resolving mod ids to full `IMod` records and filtering to Nexus-sourced
-ones before calling `nexusCheckModsVersion`) — the same bar `list_mods`
-already clears.
+`vortex_query` stays genuinely read-only (`selector`/`path` modes, neither
+can mutate anything), so it keeps working with no token at all; `api.ext`
+calls go through `vortex_dispatch` instead, since they can have side
+effects. `check_nexus_mod_updates` stays a dedicated write tool because it
+does a real join no generic dispatcher can do in one call (resolving mod
+ids to full `IMod` records and filtering to Nexus-sourced ones before
+calling `nexusCheckModsVersion`).
 
-The remaining hand-written write tools exist because they do a genuine
-join or bit of orchestration that name-based reflection can't do in one
-call, not because their underlying operation is unreachable generically:
+The remaining hand-written write tools exist because they do a genuine join
+or bit of orchestration that name-based reflection can't do in one call:
 `setModsEnabled` takes `api` directly and must be awaited rather than
 dispatched; `clone_profile` is a filesystem copy plus a dispatch;
 `launch_game` resolves the active profile's configured tool through two
-levels of settings state before running it. `deploy_mods`/`purge_mods`/
-`install_mod_from_url`/`activate_game` used to be dedicated wrappers around
-`api.events.emit` for exactly this reason (inconsistent callback positions
-per event), but became fully expressible through `vortex_dispatch`'s event
-fallback tier once it grew the `"__CALLBACK__"` convention, so they were
-removed as dedicated tools.
+levels of settings state before running it.
 
 A handful of `apiMethods` (`onStateChange`, `onAsync`, `registerProtocol`,
-`registerRepositoryLookup` — see `vortex_describe`'s `listenerHints`)
-don't perform a one-off action at all: they register a real JS function as
-a persistent listener that keeps firing for the life of the Vortex
-process. A function can't cross JSON-RPC, and the MCP transport here is
-stateless (no session tied to a connection to push results back down
-later), so `vortex_dispatch`-ing one of these substitutes the
-`"__CALLBACK__"` sentinel with a real callback that appends each firing to
-an in-process ring buffer (capped at 500 entries, oldest dropped — none of
-these APIs expose a way to unregister, so a registered listener outlives
-the call that created it) and returns a `listenerId` immediately instead
-of trying to wait for or return "the result" of something that keeps
-happening. `poll_listener` reads that buffer back — non-destructively, so
-repeated polling with the same `since` returns the same entries, with the
-returned `lastSeq` fed back in to get only what's new. This works because
-the transport being stateless only means no session-per-connection, not
-that the process is stateless: this extension runs inside Vortex's own
-long-lived process, so the listener registry survives fine across
-separate, independent tool calls — including from more than one agent at
-once, since there's already no per-caller identity in this project's trust
-model (see [Safety](#safety)): any holder of the token can register or
-poll any listener. `withPrePost` is excluded outright rather than handled
-this way — it returns a wrapped function rather than performing an action
-or registering anything, which isn't serializable and does nothing until
-invoked, which this dispatcher never does.
+`registerRepositoryLookup` — see `vortex_describe`'s `listenerHints`) don't
+perform a one-off action: they register a real JS function as a persistent
+listener that keeps firing for the life of the Vortex process. A function
+can't cross JSON-RPC and the MCP transport here is stateless, so
+`vortex_dispatch`-ing one of these substitutes the `"__CALLBACK__"`
+sentinel with a real callback that appends each firing to an in-process
+ring buffer (capped at 500 entries, oldest dropped) and returns a
+`listenerId` immediately. `poll_listener` reads that buffer back
+non-destructively — repeated polling with the same `since` returns the
+same entries, with the returned `lastSeq` fed back in to get only what's
+new. This works across separate tool calls, including from more than one
+agent at once, since there's no per-caller identity in this project's trust
+model: any holder of the token can register or poll any listener.
+`withPrePost` is excluded outright — it returns a wrapped function rather
+than performing an action, which isn't serializable.
 
-### When reflection genuinely can't reach something
+### When reflection can't reach something
 
-Every hand-written tool and fallback tier above exists because reflection
-alone can't express it — but they fall into three different categories,
-and telling them apart matters for where the fix belongs:
+A capability falls into one of three cases:
 
-1. **A real join or bit of orchestration reflection can't do in one call**
-   (`list_mods`, `clone_profile`, `launch_game`, `check_nexus_mod_updates`
-   above). The underlying operation is fully reachable through the
-   published `@nexusmods/vortex-api`; the tool just does more than one
-   generic call's worth of work. This is a vortex-mcp-side tool, and stays
-   one.
+1. **A real join or orchestration reflection can't do in one call**
+   (`list_mods`, `clone_profile`, `launch_game`,
+   `check_nexus_mod_updates`). The underlying operation is fully reachable
+   through `@nexusmods/vortex-api`; the tool just does more than one
+   generic call's worth of work. Stays a vortex-mcp-side tool.
 2. **A real Redux action exists, just not published through
    `@nexusmods/vortex-api`** — the common case for anything defined inside
-   an extension's own module rather than Vortex core (`SET_PLUGIN_ENABLED`
-   above; 79 of 81 extension-internal action creators on one real install,
-   confirmed live). This used to be indistinguishable from case 3 below —
-   "no name to dispatch" either way — until `scan_extension_actions` +
-   tier (5) closed it generically: no vortex-mcp code change needed per
-   action, it's discovered live from whatever's actually installed.
-3. **The capability isn't a plain Redux action at all** — genuinely
-   nothing for tier (5) to dispatch, published or not. The Vortex "files
-   changed outside Vortex" deploy-blocking dialog is the concrete case
-   that surfaced this: it isn't built on the generic `addDialog` system
-   `list_dialogs` reads, and resolving it isn't even a pure Redux
-   action — `confirmExternalChanges` resolves a private in-memory Promise
-   captured in a module-scope closure the moment the dialog opened, so no
-   amount of raw `{type, payload}` dispatching from outside that module
-   could ever unblock the deploy waiting on it.
+   an extension's own module. `scan_extension_actions` + tier (5) closes
+   this generically: no vortex-mcp code change needed per action.
+3. **The capability isn't a plain Redux action at all.** The Vortex "files
+   changed outside Vortex" deploy-blocking dialog is the concrete case: it
+   resolves a private in-memory Promise captured in a module-scope closure,
+   so no amount of raw dispatching from outside that module can reach it.
+   The fix belongs in Vortex core, as a `context.registerAPI(...)`
+   addition — once exposed that way, it becomes a normal `api.ext` entry
+   and `vortex_dispatch` picks it up for free, no vortex-mcp code change
+   required. `mod_management/index.ts` gained
+   `confirmExternalChanges`/`setExternalChangeAction` `registerAPI` calls
+   for exactly this reason.
 
-   For case 3, the fix does **not** belong in vortex-mcp — there's nothing
-   here to hand-write around a capability the API doesn't have. It belongs
-   in Vortex core itself, as a `context.registerAPI(...)` addition (same
-   pattern as `restartVortex`'s `window.api.app.relaunch`: reaching a real
-   but previously-unpublished runtime surface, not inventing one). Once
-   Vortex exposes it that way, it becomes a normal `api.ext` entry —
-   vortex-mcp's reflection picks it up for free via `vortex_dispatch`'s
-   existing fallback tier, with **no vortex-mcp code change required**.
-   `mod_management/index.ts` gained `confirmExternalChanges`/
-   `setExternalChangeAction` `registerAPI` calls for exactly this reason;
-   once that ships, resolving the dialog from here is just
-   `vortex_dispatch({action: "confirmExternalChanges", args: [false]})`
-   (optionally preceded by `setExternalChangeAction` calls to override the
-   default per-file action first).
-
-### Nexus mod search: checked, doesn't exist, not building it
-
-Keyword search for mods on Nexus was considered and dropped — recorded
-here so it isn't re-investigated. Checked at every layer that could
-plausibly carry it: Vortex's own `api.ext.nexus*` surface has no search
-(only `nexusGetTrendingMods`/`nexusGetLatestMods` and
-`nexusSearchCollections`, which is Collections-only); the official Nexus
-v3 REST API's OpenAPI schema has no search endpoint; Vortex's own in-app
-Nexus browser (`browse_nexus/views/BrowseNexusPage.tsx`) searches
-Collections only, same limitation; and Mod Organizer 2's Nexus
-integration doesn't do API-driven mod search either — its `browserview.h`
-embeds an actual browser widget pointed at the real nexusmods.com website
-for search, the same "embed the website" pattern Vortex's own browser
-page uses. Two independent mod managers converged on the same workaround,
-which is itself evidence there's nothing to wrap: **no mod manager
-checked does API-driven Nexus mod search**, because the capability
-doesn't exist in Nexus's public API at all — not merely unexposed by
-Vortex's wrapper.
-
-That distinction is why case (b) above doesn't apply here: there's no
-upstream capability for Vortex core to expose via `registerAPI`, so
-there's nothing for vortex-mcp to reflect either. Writing a search tool
-today would mean either scraping the website (fragile, outside any
-published API) or calling Nexus's API directly with the raw key — the
-exact `state.confidential` exposure the [Safety](#safety) section above
-closes, reopened from inside vortex-mcp's own code. If Nexus ever ships a
-search endpoint, the fix is the same shape as `confirmExternalChanges`:
-Vortex core adds `api.ext.nexusSearchMods` (or similar) beside the
-existing `nexusSearchCollections`, holding the key internally and
-returning only results, and `vortex_dispatch` picks it up for free with
-zero vortex-mcp changes.
+Nexus mod search falls into the same non-reachable category, for a
+different reason: it was evaluated across every layer that could
+plausibly carry it (Vortex's `api.ext.nexus*` surface, the official Nexus
+v3 REST API, Vortex's own in-app browser, Mod Organizer 2's integration)
+and none of them expose it — the capability doesn't exist in Nexus's
+public API at all, so there's no upstream surface for Vortex core to
+expose via `registerAPI` either. Writing a search tool today would mean
+scraping the website or calling Nexus's API directly with the raw key,
+reopening the `state.confidential` exposure the [Safety](#safety) section
+closes. If Nexus ever ships a search endpoint, the fix is the same shape
+as `confirmExternalChanges`.
 
 ### Keeping this table in sync
 
-The tools table above is generated, not hand-written — it comes straight
-from the live server's own `tools/list` response, the same ground truth
-`vortex_describe` reflects. That's a deliberate answer to how this project
-already went out of sync with itself twice in one session (a stale
-write-tool count, a table missing a tool that had shipped): a table
-transcribed by hand can drift from the code; a table generated from the
-running server's actual response cannot, by construction — the same
-principle behind `vortex_query`/`vortex_dispatch` themselves.
+The tools table above is generated from the live server's own `tools/list`
+response, the same ground truth `vortex_describe` reflects, so it can't
+drift from the code the way a hand-transcribed table can.
 
 ```sh
 pnpm run docs:tools          # regenerate the table (needs Vortex running with this extension loaded)
 pnpm run docs:tools:check    # verify it's current; exits 1 if stale, prints what to run
 ```
 
-This can't run in CI (no live Vortex instance there), so it's a local
-step — after adding/changing/removing a tool, run `docs:tools` before
+This can't run in CI (no live Vortex instance there), so it's a local step
+— after adding/changing/removing a tool, run `docs:tools` before
 committing. The read/write access tier isn't part of MCP's `tools/list`
 response, so it stays a small hand-maintained map inside the generator
-script (`ACCESS_TIER` in `scripts/generate-readme-tools-table.mjs`) —
-everything else (names, descriptions, tool count) regenerates from reality.
+script (`ACCESS_TIER` in `scripts/generate-readme-tools-table.mjs`).
 
 ## Architecture
 
@@ -366,40 +263,29 @@ undefined`), matching the 2026-07-28 spec's removal of sessions — there is
   a server that reads/writes nothing real.
 - `restartVortex` (in `vortexControl.ts`) is the one function that reaches
   outside `@nexusmods/vortex-api` — it calls `window.api.app.relaunch()`,
-  Vortex's own Electron preload bridge (reachable because this extension
-  shares the renderer process), which is the exact path behind Vortex's own
-  "Restart now" button: graceful window close, then Vortex's normal shutdown
-  sequence, then relaunch. Unlike vortex-api this isn't a published contract
-  — it can change across Vortex releases without notice.
+  Vortex's own Electron preload bridge, the exact path behind Vortex's own
+  "Restart now" button. Unlike vortex-api this isn't a published contract —
+  it can change across Vortex releases without notice.
 
 ## Release process
 
-`.github/workflows/release.yml` follows the same pattern as the sibling
-FloatingDamageNG/devbench repos: `semantic-release` reads Conventional
+`.github/workflows/release.yml`: `semantic-release` reads Conventional
 Commit history on every push to `main`, and — if there's anything
 releasable — picks the next version, bumps it in `package.json`/`info.json`,
 commits that back (`[skip ci]`), tags `vX.Y.Z`, and opens a draft GitHub
 Release with the generated changelog as its body. A second job then checks
 out that exact tag, runs the full `pnpm run ci` pipeline, zips `dist/` +
-`info.json` into the same layout `install-plugin` uses (so unzipping it
-straight into `%APPDATA%/vortex/plugins/vortex-mcp` works with no
-rearranging), attaches it to the release, and promotes the release out of
-draft — only after the asset exists, so a failed build leaves a hidden
-draft instead of a download-less tag.
+`info.json` into the same layout `install-plugin` uses, attaches it to the
+release, and promotes the release out of draft — only after the asset
+exists, so a failed build leaves a hidden draft instead of a
+download-less tag.
 
-**Nexus upload has a mod page and file group, but auto-upload is off by
-default.** `.github/workflows/nexus-upload.yml` wraps
-`alandtse/nexus-workflows`'s `upload-nexus-official.yml` — the official
-`Nexus-Mods/upload-action` (Nexus v3 API) path, rather than the
-`BUTR.NexusUploader`/`unex` wrapper the sibling FloatingDamageNG/devbench
-repos still use; it handles its own dry-run reporting and
-idempotent-reupload check internally. The mod page exists (`nexus_mod_id`
-2263, https://www.nexusmods.com/games/site/mods/2263) and
-`file_group_id` (7907967, minted by uploading the mod's first file by
-hand on the website) is set as the workflow's default. Dry-run still
-stays the only mode until the `NEXUS_AUTO_UPLOAD=true` repo variable
-(plus `UNEX_APIKEY`) is set, letting `release.yml` upload every
-subsequent version automatically.
+`.github/workflows/nexus-upload.yml` wraps `alandtse/nexus-workflows`'s
+`upload-nexus-official.yml` (the official `Nexus-Mods/upload-action`, Nexus
+v3 API). The mod page (`nexus_mod_id` 2263) and file group (`file_group_id` 7907967) both exist and are set as the workflow's defaults. Dry-run stays
+the default until the `NEXUS_AUTO_UPLOAD=true` repo variable (plus
+`UNEX_APIKEY`) is set, letting `release.yml` upload every subsequent
+version automatically.
 
 ## Safety
 
@@ -410,70 +296,46 @@ alone, is what stops a DNS-rebinding page from reaching the server as
 same-origin.
 
 **Writes fail closed on `VORTEX_MCP_TOKEN`.** With no token set, only the
-read tools — every tool marked `read` in the [Tools](#tools) table above,
-generated from the live server so it can't drift the way a second
-hand-typed list here would — are ever registered; none of the eight write
-tools
-(`switch_profile`, `clone_profile`, `vortex_dispatch`, `poll_listener`,
-`backup_state`, `set_mods_enabled`, `launch_game`, `vortex_restart`) exist
-to call. Set `VORTEX_MCP_TOKEN` to
-require `Authorization: Bearer <token>` on every request (reads included)
-_and_ unlock the write tools. There is no per-tool authorization once a
-token is set — any client holding it has full write privileges, including
-`vortex_restart` (kills and relaunches the whole app), and — via
-`vortex_dispatch` — every Redux action, `api.ext` function, event (e.g.
-`purge-mods`, which deletes deployed game files, or `start-download`,
-which downloads and installs arbitrary content), and direct api method
-Vortex has, including ones that touch game/install paths, extensions, and
-credentials. This is deliberate, not an oversight:
-the token is meant to represent the same trust a human already has at
-Vortex's own UI, so there's no further curated allowlist narrowing what an
-authenticated caller can do (see the `vortex_dispatch` section above for
-why an earlier, more restrictive version of this was removed). Acceptable
-for a local single-user tool; do not bind this to a non-loopback address,
-and treat the token like any other local secret.
+read tools — every tool marked `read` in the [Tools](#tools) table above —
+are ever registered; none of the eight write tools (`switch_profile`,
+`clone_profile`, `vortex_dispatch`, `poll_listener`, `backup_state`,
+`set_mods_enabled`, `launch_game`, `vortex_restart`) exist to call. Set
+`VORTEX_MCP_TOKEN` to require `Authorization: Bearer <token>` on every
+request (reads included) _and_ unlock the write tools. There is no
+per-tool authorization once a token is set — any client holding it has
+full write privileges, including `vortex_restart` (kills and relaunches
+the whole app), and — via `vortex_dispatch` — every Redux action,
+`api.ext` function, event, and direct api method Vortex has, including
+ones that touch game/install paths, extensions, and credentials. This is
+deliberate: the token represents the same trust a human already has at
+Vortex's own UI. Acceptable for a local single-user tool; do not bind this
+to a non-loopback address, and treat the token like any other local
+secret.
 
 **One exception to "no per-tool restriction": `state.confidential` (the
 Nexus API key or OAuth credential Vortex itself stores) is redacted out of
-every `vortex_query` response, token or no token.** This surfaced live:
-`vortex_query({selector: "apiKey"})` and `vortex_query({path:
-["confidential", ...]})` both returned the real credential in plaintext,
-because reflection swept up `state.confidential` the same as every other
-harmless selector/path. Redaction happens in `mcpServer.ts`'s `jsonText` —
-the one funnel every tool response already serializes through — by
-provenance: anything sourced from the live `state.confidential` subtree
-(matched structurally for objects, by value for a freshly-computed string
-like `apiKey`'s return) becomes `"[redacted: state.confidential]"` before
-it's ever written to the wire. Selectors that legitimately derive a
-non-secret fact from that subtree (`isLoggedIn`) are unaffected — the
-redaction runs on the _output_, after the selector already ran on real
-state, not by handing selectors a doctored copy of `state` up front (that
-was considered and rejected: it corrupts any selector that reads
-`confidential` for a non-secret purpose, returning a wrong answer instead
-of a visible redaction). This is a token-independent invariant, not a
-tier: a human at Vortex's own UI can't read their stored credential back
-out as plaintext either, so redacting it is the UI-parity floor, not a
-restriction the token lifts. `vortex_dispatch` can still _write_ new
-credentials (`setUserAPIKey`, `nexusRequestNexusLogin`, …) — same as a
-human re-entering their key in Vortex's settings page — the boundary is
-specifically on reading one back out.
+every `vortex_query` response, token or no token.** Redaction happens in
+`mcpServer.ts`'s `jsonText` — the one funnel every tool response already
+serializes through — by provenance: anything sourced from the live
+`state.confidential` subtree (matched structurally for objects, by value
+for a freshly-computed string like `apiKey`'s return) becomes
+`"[redacted: state.confidential]"` before it's ever written to the wire.
+Selectors that legitimately derive a non-secret fact from that subtree
+(`isLoggedIn`) are unaffected — the redaction runs on the _output_, after
+the selector already ran on real state. This is a token-independent
+invariant: a human at Vortex's own UI can't read their stored credential
+back out as plaintext either. `vortex_dispatch` can still _write_ new
+credentials (`setUserAPIKey`, `nexusRequestNexusLogin`, …) — the boundary
+is specifically on reading one back out.
 
 **Writes can optionally guard against a stale assumption about what's
-currently active.** This surfaced from a real incident, not a
-hypothetical: switching to a large profile, doing an extended read-only
-analysis assuming it stayed active, then discovering — only by noticing a
-suspiciously small result from an unrelated tool — that the active
-profile had silently reverted to a different one partway through, with no
-error or notification from anything here. `switch_profile`,
-`set_mods_enabled`, `launch_game`, and `vortex_dispatch` all accept
-optional `expectedActiveProfileId`/`expectedActiveGameId` params; when
-set, the write throws immediately — before touching anything — if the
-live active profile/game no longer matches what the caller last observed,
-instead of silently proceeding against whatever's active now. Opt-in and
-additive: omit them and behavior is unchanged. Deliberately doesn't try
-to attribute _who_ changed the context (the user's own Vortex UI, another
-agent, a health check) — Vortex's own log doesn't record that either —
-it only lets a caller assert their own earlier observation still holds.
+currently active.** `switch_profile`, `set_mods_enabled`, `launch_game`,
+and `vortex_dispatch` all accept optional
+`expectedActiveProfileId`/`expectedActiveGameId` params; when set, the
+write throws immediately — before touching anything — if the live active
+profile/game no longer matches what the caller last observed, instead of
+silently proceeding against whatever's active now. Opt-in and additive:
+omit them and behavior is unchanged.
 
 ## License
 
