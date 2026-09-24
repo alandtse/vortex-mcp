@@ -461,25 +461,38 @@ describe("vortexControl: mods", () => {
     ]);
     expect(listMods(api, undefined, { limit: 1 })).toHaveLength(1);
   });
+});
 
-  it("setModsEnabled uses an explicit profileId over the active one", async () => {
-    await setModsEnabled(fakeApi(), ["modA"], false, "p-explicit");
+describe("vortexControl: setModsEnabled", () => {
+  // modState is swapped by the actions.setModsEnabled mock below, so the post-call
+  // re-read sees whatever the fake "Vortex" did — including doing nothing.
+  function setup(modState: Record<string, { enabled: boolean }>) {
+    const profile = { id: "p1", name: "Test", gameId: "skyrimse", modState, lastActivated: 0 };
+    vi.mocked(selectors.activeProfileId).mockReturnValue("p1");
+    vi.mocked(selectors.profiles).mockImplementation(() => ({ p1: profile }) as never);
+    vi.mocked(actions.setModsEnabled).mockReset();
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      persistent: {
+        mods: {
+          skyrimse: {
+            modA: { id: "modA", state: "installed", type: "", installationPath: "" },
+            modB: { id: "modB", state: "installed", type: "", installationPath: "" },
+            modC: { id: "modC", state: "installed", type: "", installationPath: "" },
+          },
+        },
+      },
+    });
+    return { api, profile };
+  }
 
-    expect(actions.setModsEnabled).toHaveBeenCalledWith(
-      expect.anything(),
-      "p-explicit",
-      ["modA"],
-      false,
-    );
-  });
-
-  it("setModsEnabled throws when there is no active profile and none was provided", async () => {
+  it("throws when there is no active profile and none was provided", async () => {
     vi.mocked(selectors.activeProfileId).mockReturnValue(undefined);
 
     await expect(setModsEnabled(fakeApi(), ["modA"], true)).rejects.toThrow(/No active profile/);
   });
 
-  it("setModsEnabled rejects when expectedActiveProfileId no longer matches, without calling the action", async () => {
+  it("rejects when expectedActiveProfileId no longer matches, without calling the action", async () => {
     vi.mocked(selectors.activeProfileId).mockReturnValue("someOtherProfile");
     vi.mocked(actions.setModsEnabled).mockClear();
 
@@ -489,6 +502,77 @@ describe("vortexControl: mods", () => {
       }),
     ).rejects.toThrow(/Active profile changed/);
     expect(actions.setModsEnabled).not.toHaveBeenCalled();
+  });
+
+  it("uses an explicit profileId over the active one", async () => {
+    const { api } = setup({});
+    vi.mocked(selectors.profiles).mockImplementation(
+      () => ({ "p-explicit": { id: "p-explicit", gameId: "skyrimse", modState: {} } }) as never,
+    );
+
+    await setModsEnabled(api, ["modA"], false, "p-explicit");
+
+    expect(actions.setModsEnabled).toHaveBeenCalledWith(
+      expect.anything(),
+      "p-explicit",
+      ["modA"],
+      false,
+    );
+  });
+
+  it("rejects an unknown profileId without calling the action", async () => {
+    const { api } = setup({});
+
+    await expect(setModsEnabled(api, ["modA"], true, "missing")).rejects.toThrow(
+      /Unknown profile: missing/,
+    );
+    expect(actions.setModsEnabled).not.toHaveBeenCalled();
+  });
+
+  it("rejects the whole call when any mod id is unknown, without calling the action", async () => {
+    // Regression test for the live finding: actions.setModsEnabled doesn't check ids, and
+    // enabling an unknown one wrote a modState entry for a mod that doesn't exist.
+    const { api } = setup({ modA: { enabled: false } });
+
+    await expect(setModsEnabled(api, ["modA", "not-a-mod"], true)).rejects.toThrow(
+      /Unknown mod id\(s\) for game "skyrimse": not-a-mod — nothing was changed/,
+    );
+    expect(actions.setModsEnabled).not.toHaveBeenCalled();
+  });
+
+  it("reports changed and unchanged mods from a re-read of the profile", async () => {
+    const { api, profile } = setup({ modA: { enabled: false }, modB: { enabled: true } });
+    vi.mocked(actions.setModsEnabled).mockImplementation((async () => {
+      profile.modState = { modA: { enabled: true }, modB: { enabled: true } };
+    }) as never);
+
+    const result = await setModsEnabled(api, ["modA", "modB", "modA"], true);
+
+    expect(actions.setModsEnabled).toHaveBeenCalledWith(
+      expect.anything(),
+      "p1",
+      ["modA", "modB"],
+      true,
+    );
+    expect(result).toEqual({
+      profileId: "p1",
+      enabled: true,
+      changed: ["modA"],
+      unchanged: ["modB"],
+      failed: [],
+    });
+  });
+
+  it("reports mods the action silently didn't change as failed", async () => {
+    // actions.setModsEnabled resolves (with only an error notification) when a pre-hook
+    // vetoes the change — the mock doing nothing reproduces that.
+    const { api } = setup({ modA: { enabled: true }, modC: { enabled: true } });
+    vi.mocked(actions.setModsEnabled).mockImplementation((async () => undefined) as never);
+
+    const result = await setModsEnabled(api, ["modA", "modC"], false);
+
+    expect(result.changed).toEqual([]);
+    expect(result.failed).toEqual(["modA", "modC"]);
   });
 });
 

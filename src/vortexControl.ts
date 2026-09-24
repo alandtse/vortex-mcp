@@ -1372,20 +1372,78 @@ export async function getPluginDetails(
   });
 }
 
+function isModEnabled(profile: IProfile | undefined, modId: string): boolean {
+  return profile?.modState?.[modId]?.enabled ?? false;
+}
+
+export interface SetModsEnabledResult {
+  profileId: string;
+  enabled: boolean;
+  /** Mods this call actually switched to the requested state. */
+  changed: string[];
+  /** Mods that were already in the requested state before the call. */
+  unchanged: string[];
+  /**
+   * Mods that should have changed but are still in the old state afterwards — e.g. when
+   * an `enable-mods` hook from another extension throws. actions.setModsEnabled catches
+   * that and only shows an error notification, never rejecting, so this re-read of the
+   * profile's modState is the only signal a caller gets.
+   */
+  failed: string[];
+}
+
+/**
+ * Enables/disables mods via actions.setModsEnabled — Vortex's own path, including the
+ * `enable-mods` pre/post hooks other extensions listen on — then reports what really
+ * changed. actions.setModsEnabled doesn't check mod ids at all. Found live: disabling
+ * an unknown id silently no-ops, and ENABLING one writes a modState entry for a mod
+ * that doesn't exist (inflating list_profiles' counts until removed with forgetMod) —
+ * both while this tool's old fixed "Enabled N mod(s)" text claimed success. So every id
+ * is validated against the profile's game before anything is dispatched, all-or-nothing:
+ * one unknown id fails the whole call with nothing changed.
+ */
 export async function setModsEnabled(
   api: IExtensionApi,
   modIds: string[],
   enabled: boolean,
   profileId?: string,
   expectedContext?: ExpectedContext,
-): Promise<void> {
+): Promise<SetModsEnabledResult> {
   assertExpectedContext(api, expectedContext);
   const st = state(api);
   const targetProfileId = profileId ?? selectors.activeProfileId(st);
   if (!targetProfileId) {
     throw new Error("No active profile and no profileId provided");
   }
-  await actions.setModsEnabled(api, targetProfileId, modIds, enabled);
+  const profile = selectors.profiles(st)[targetProfileId] as IProfile | undefined;
+  if (profile === undefined) {
+    throw new Error(`Unknown profile: ${targetProfileId}`);
+  }
+
+  const ids = [...new Set(modIds)];
+  const mods: { [id: string]: IMod } = st.persistent.mods[profile.gameId] ?? {};
+  const unknown = ids.filter((id) => mods[id] === undefined);
+  if (unknown.length > 0) {
+    throw new Error(
+      `Unknown mod id(s) for game "${profile.gameId}": ${unknown.join(", ")} — nothing was ` +
+        "changed. Mod ids are list_mods' `id` field, not the display name; use list_mods " +
+        "with nameFilter to find them.",
+    );
+  }
+
+  const unchanged = ids.filter((id) => isModEnabled(profile, id) === enabled);
+  const toChange = ids.filter((id) => isModEnabled(profile, id) !== enabled);
+
+  await actions.setModsEnabled(api, targetProfileId, ids, enabled);
+
+  const after = selectors.profiles(state(api))[targetProfileId] as IProfile | undefined;
+  return {
+    profileId: targetProfileId,
+    enabled,
+    changed: toChange.filter((id) => isModEnabled(after, id) === enabled),
+    unchanged,
+    failed: toChange.filter((id) => isModEnabled(after, id) !== enabled),
+  };
 }
 
 interface DiscoveredTool {
