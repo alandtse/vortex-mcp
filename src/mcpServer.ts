@@ -300,7 +300,9 @@ function registerModInventoryTools(server: McpServer, api: IExtensionApi): void 
       description:
         "List the current Gamebryo/LOOT plugin load order (.esp/.esm/.esl), sorted by index. " +
         "Only available for games using plugin-based load ordering (e.g. Skyrim, Fallout) — " +
-        "throws for games that don't have one active.",
+        "throws for games that don't have one active. `isNative` marks plugins the game " +
+        "engine loads by itself (base game, DLC, Creation Club); those are always reported " +
+        "enabled, whatever Vortex's stored flag says.",
       inputSchema: z.object({}),
     },
     async () => ({
