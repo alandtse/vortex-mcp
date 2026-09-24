@@ -504,9 +504,27 @@ describe("vortexControl: listLoadOrder", () => {
     });
 
     expect(listLoadOrder(api)).toEqual([
-      { plugin: "skyrim.esm", index: 0, enabled: true },
-      { plugin: "update.esm", index: 1, enabled: true },
-      { plugin: "mymod.esp", index: 2, enabled: false },
+      { plugin: "skyrim.esm", index: 0, enabled: true, isNative: false },
+      { plugin: "update.esm", index: 1, enabled: true, isNative: false },
+      { plugin: "mymod.esp", index: 2, enabled: false, isNative: false },
+    ]);
+  });
+
+  it("reports native plugins enabled even when state.loadOrder says they aren't", () => {
+    // Regression test for the live finding: after a deploy, Vortex's plugin sync stored
+    // every native master as enabled: false (plugins.txt never lists them).
+    const api = fakeApi();
+    (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
+      loadOrder: {
+        "skyrim.esm": { loadOrder: 0, enabled: false },
+        "mymod.esp": { loadOrder: 1, enabled: false },
+      },
+      session: { plugins: { pluginList: { "skyrim.esm": { isNative: true }, "mymod.esp": {} } } },
+    });
+
+    expect(listLoadOrder(api)).toEqual([
+      { plugin: "skyrim.esm", index: 0, enabled: true, isNative: true },
+      { plugin: "mymod.esp", index: 1, enabled: false, isNative: false },
     ]);
   });
 
@@ -1815,12 +1833,16 @@ describe("vortexControl: findMissingMasters", () => {
     await writeFile(path.join(tempRoot, "Data", name), buildTES4Buffer(masters));
   }
 
-  function apiWithLoadOrder(loadOrder: Record<string, { loadOrder: number; enabled: boolean }>) {
+  function apiWithLoadOrder(
+    loadOrder: Record<string, { loadOrder: number; enabled: boolean }>,
+    pluginList: Record<string, { isNative?: boolean }> = {},
+  ) {
     vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
     const api = fakeApi();
     (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
       settings: { gameMode: { discovered: { skyrimse: { path: tempRoot } } } },
       loadOrder,
+      session: { plugins: { pluginList } },
     });
     return api;
   }
@@ -1845,6 +1867,22 @@ describe("vortexControl: findMissingMasters", () => {
       "Skyrim.esm": { loadOrder: 0, enabled: true },
       "Patch.esp": { loadOrder: 1, enabled: true },
     });
+
+    expect(await findMissingMasters(api)).toEqual([]);
+  });
+
+  it("counts native masters as enabled even when state.loadOrder says they aren't", async () => {
+    // Regression test for the live finding: with the post-deploy state below, every
+    // plugin was reported as missing Skyrim.esm.
+    await writePlugin("Skyrim.esm", []);
+    await writePlugin("Patch.esp", ["Skyrim.esm"]);
+    const api = apiWithLoadOrder(
+      {
+        "skyrim.esm": { loadOrder: 0, enabled: false },
+        "patch.esp": { loadOrder: 1, enabled: true },
+      },
+      { "skyrim.esm": { isNative: true } },
+    );
 
     expect(await findMissingMasters(api)).toEqual([]);
   });
@@ -2337,11 +2375,15 @@ describe("vortexControl: findMissingDeployedFiles", () => {
     await rm(docsRoot, { recursive: true, force: true });
   });
 
-  function apiWithLoadOrder(loadOrder: Record<string, { loadOrder: number; enabled: boolean }>) {
+  function apiWithLoadOrder(
+    loadOrder: Record<string, { loadOrder: number; enabled: boolean }>,
+    pluginList: Record<string, { isNative?: boolean }> = {},
+  ) {
     const api = fakeApi();
     (api as unknown as { store: { getState: () => unknown } }).store.getState = () => ({
       settings: { gameMode: { discovered: { skyrimse: { path: gameRoot } } } },
       loadOrder,
+      session: { plugins: { pluginList } },
     });
     return api;
   }
@@ -2379,6 +2421,19 @@ describe("vortexControl: findMissingDeployedFiles", () => {
     await writeFile(path.join(gameRoot, "Data", "Skyrim.esm"), "x");
     await writePluginsTxt(["*Skyrim.esm"]);
     const api = apiWithLoadOrder({ "Skyrim.esm": { loadOrder: 0, enabled: true } });
+
+    expect(await findMissingDeployedFiles(api)).toEqual([]);
+  });
+
+  it("doesn't flag a native master that state.loadOrder marks disabled", async () => {
+    // Regression test for the live finding: all 10 base-game/Creation Club masters were
+    // reported after a deploy (vortexEnabled false, file present, not in plugins.txt).
+    await writeFile(path.join(gameRoot, "Data", "Skyrim.esm"), "x");
+    await writePluginsTxt([]);
+    const api = apiWithLoadOrder(
+      { "skyrim.esm": { loadOrder: 0, enabled: false } },
+      { "skyrim.esm": { isNative: true } },
+    );
 
     expect(await findMissingDeployedFiles(api)).toEqual([]);
   });

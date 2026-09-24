@@ -1220,9 +1220,15 @@ export interface LoadOrderEntry {
    * MOD's enabled state (see ModSummary.enabled). A mod can be enabled while one of the
    * plugins it ships is toggled off here (see DeploymentDiscrepancy.vortexEnabled, the
    * same underlying flag): toggling a mod on/off does not necessarily toggle every plugin
-   * it ships, and set_mods_enabled operates on mods, not individual plugins.
+   * it ships, and set_mods_enabled operates on mods, not individual plugins. Always true
+   * for a native plugin (see isNative).
    */
   enabled: boolean;
+  /**
+   * A plugin the game engine loads by itself (base game, DLC, Creation Club masters) —
+   * Vortex has no say over whether it's active, only over its position.
+   */
+  isNative: boolean;
 }
 
 /**
@@ -1231,6 +1237,13 @@ export interface LoadOrderEntry {
  * @nexusmods/vortex-api's published IState (discovered live via vortex_describe, not
  * from the type declarations). Games using file_based_loadorder instead (no .esp/.esm
  * plugins) won't have this key; this throws rather than silently returning nothing.
+ *
+ * Native plugins (session.plugins.pluginList[…].isNative) are reported enabled no matter
+ * what state.loadOrder says. Found live: after a deploy, gamebryo-plugin-management's
+ * plugin sync reads plugins.txt, which never lists native plugins (the engine loads them
+ * implicitly), and stores all of them as enabled: false. Taken at face value, that made
+ * find_missing_masters report nearly every plugin as missing Skyrim.esm/Update.esm/…,
+ * and find_missing_deployed_files flag every native master — though the game loads them.
  */
 export function listLoadOrder(api: IExtensionApi): LoadOrderEntry[] {
   const raw = queryStatePath(api, ["loadOrder"]) as
@@ -1242,8 +1255,20 @@ export function listLoadOrder(api: IExtensionApi): LoadOrderEntry[] {
         "use a different load-order system (e.g. file_based_loadorder), or none is active.",
     );
   }
+  const pluginList = (queryStatePath(api, ["session", "plugins", "pluginList"]) ?? {}) as Record<
+    string,
+    { isNative?: boolean } | undefined
+  >;
   return Object.entries(raw)
-    .map(([plugin, entry]) => ({ plugin, index: entry.loadOrder, enabled: entry.enabled ?? true }))
+    .map(([plugin, entry]) => {
+      const isNative = (pluginList[plugin] ?? pluginList[plugin.toLowerCase()])?.isNative === true;
+      return {
+        plugin,
+        index: entry.loadOrder,
+        enabled: isNative || (entry.enabled ?? true),
+        isNative,
+      };
+    })
     .toSorted((a, b) => a.index - b.index);
 }
 
