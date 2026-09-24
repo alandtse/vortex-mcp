@@ -1023,6 +1023,86 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
   );
 
   server.registerTool(
+    "deploy_mods",
+    {
+      description:
+        "Deploy the active profile's enabled mods to the game folder — the same operation " +
+        "as Vortex's own Deploy button — and wait until it's really done, including the " +
+        "LOOT auto-sort that follows (so list_load_order shows the final order afterwards). " +
+        "Fails up front instead of deploying when the game is running (also when started " +
+        "outside Vortex, found via the OS process list) or a tool started from Vortex is — " +
+        "Vortex would skip the deploy and report no error, or get stuck on files the game " +
+        "holds open — or another mod operation is in progress. If Vortex stops to ask the user something (e.g. files " +
+        "changed outside Vortex), this times out with a pointer to list_dialogs / " +
+        "list_external_changes; the deploy stays pending in Vortex. Returns deployMs and " +
+        "lootSort (done / not-started / disabled / timeout).",
+      inputSchema: z.object({
+        timeoutSeconds: z
+          .number()
+          .int()
+          .min(1)
+          .max(3600)
+          .optional()
+          .describe("How long to wait for the deploy itself; default 120"),
+        expectedActiveProfileId: expectedContextSchema.expectedActiveProfileId,
+      }),
+    },
+    async ({ timeoutSeconds, expectedActiveProfileId }) => ({
+      content: [
+        jsonText(
+          await control.deployMods(
+            api,
+            { activeProfileId: expectedActiveProfileId },
+            timeoutSeconds === undefined ? undefined : timeoutSeconds * 1000,
+          ),
+        ),
+      ],
+    }),
+  );
+
+  server.registerTool(
+    "purge_mods",
+    {
+      description:
+        "Purge (undeploy) the active profile's mod files from the game folder — the same " +
+        "operation as Vortex's own Purge button — and wait until it's really done. Same " +
+        "up-front checks as deploy_mods (fails instead of purging when the game — also " +
+        "one started outside Vortex — or a tool started from Vortex is running, or another " +
+        "mod operation is in progress) and the same timeout behavior. " +
+        "Mod enabled states are untouched; deploy_mods puts the files back. Returns purgeMs.",
+      inputSchema: z.object({
+        allowFallback: z
+          .boolean()
+          .optional()
+          .describe(
+            "If the normal purge fails, fall back to removing the files listed in Vortex's " +
+              "deployment manifest (vortex.deployment.json); default false",
+          ),
+        timeoutSeconds: z
+          .number()
+          .int()
+          .min(1)
+          .max(3600)
+          .optional()
+          .describe("How long to wait for the purge; default 120"),
+        expectedActiveProfileId: expectedContextSchema.expectedActiveProfileId,
+      }),
+    },
+    async ({ allowFallback, timeoutSeconds, expectedActiveProfileId }) => ({
+      content: [
+        jsonText(
+          await control.purgeMods(
+            api,
+            { activeProfileId: expectedActiveProfileId },
+            timeoutSeconds === undefined ? undefined : timeoutSeconds * 1000,
+            allowFallback,
+          ),
+        ),
+      ],
+    }),
+  );
+
+  server.registerTool(
     "launch_game",
     {
       description:

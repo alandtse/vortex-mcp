@@ -1,5 +1,7 @@
 import path from "node:path";
 import crypto from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { open, readdir, readFile, stat } from "node:fs/promises";
 
 import { actions, selectors, util, fs, log, types } from "@nexusmods/vortex-api";
@@ -445,16 +447,20 @@ const CALLBACK_SENTINEL = "__CALLBACK__";
 // the ones that use it) for the events this project has verified — same "documentation,
 // not a gate" role as ACTION_HINTS/EXTENSION_API_HINTS. Confirmed by what deploy_mods/
 // purge_mods/install_mod_from_url/activate_game (removed as dedicated tools once this
-// generic mechanism could fully express them) used to call directly.
+// generic mechanism could fully express them — deploy_mods/purge_mods later came back,
+// see assertModOperationPossible) used to call directly.
 const EVENT_HINTS = new Map<string, string>([
   [
     "deploy-mods",
     '"__CALLBACK__" — no other args. Resolves once deployment actually finishes ' +
-      "(not just once it started).",
+      "(not just once it started). Prefer the deploy_mods tool: while the game or a tool " +
+      "runs, Vortex skips the deploy and this still resolves with no error.",
   ],
   [
     "purge-mods",
-    'allowFallback: boolean, "__CALLBACK__" — resolves once the purge actually finishes.',
+    'allowFallback: boolean, "__CALLBACK__" — resolves once the purge actually finishes. ' +
+      "Prefer the purge_mods tool: while the game or a tool runs, Vortex skips the purge " +
+      "and this still resolves with no error.",
   ],
   [
     "start-download",
@@ -1386,6 +1392,221 @@ export async function setModsEnabled(
     throw new Error("No active profile and no profileId provided");
   }
   await actions.setModsEnabled(api, targetProfileId, modIds, enabled);
+}
+
+const MOD_OPERATION_TIMEOUT_MS = 120_000;
+// The LOOT auto-sort isn't part of deploy-mods' own callback: gamebryo-plugin-management
+// starts it from its did-deploy plugin sync, found live ~0.3s after the callback fired.
+// Give it this long to show up in session.base.activity.plugins before assuming no sort
+// is coming (e.g. a game without LOOT), then this long to finish.
+const LOOT_SORT_START_GRACE_MS = 2_000;
+const LOOT_SORT_TIMEOUT_MS = 60_000;
+const WAIT_POLL_MS = 100;
+
+export interface DeployResult {
+  profileId: string;
+  /** Wall time of the deploy itself, until deploy-mods' callback fired. */
+  deployMs: number;
+  /**
+   * What happened with the LOOT auto-sort that follows a deploy: `done` (ran and
+   * finished — list_load_order now shows the final order), `not-started` (none showed
+   * up within the grace period), `disabled` (settings.plugins.autoSort is off), or
+   * `timeout` (still running when this call gave up waiting).
+   */
+  lootSort: "done" | "not-started" | "disabled" | "timeout";
+}
+
+function sessionBase(api: IExtensionApi): types.ISession {
+  return state(api).session.base;
+}
+
+export interface PurgeResult {
+  profileId: string;
+  /** Wall time of the purge, until purge-mods' callback fired. */
+  purgeMs: number;
+}
+
+async function waitFor(check: () => boolean, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    await new Promise((resolve) => setTimeout(resolve, WAIT_POLL_MS));
+  }
+  return true;
+}
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Looks for the active game's executable in the OS process list (by name, like Vortex's
+ * own ProcessMonitor fallback) and returns the name if it's running. Needed because
+ * session.base.toolsRunning misses it: ProcessMonitor only starts polling once
+ * toolsRunning is already non-empty, i.e. once Vortex itself launched something. Found
+ * live: with Skyrim SE started before a Vortex restart, toolsRunning stayed empty, a purge
+ * went ahead, and it hung on Vortex's "File busy … Skyrim (pid)" dialog for every plugin
+ * the game held open. Uses Windows' tasklist; where that can't run (another OS), returns
+ * undefined and only toolsRunning is checked.
+ */
+async function findRunningGameProcess(api: IExtensionApi): Promise<string | undefined> {
+  const st = state(api);
+  const discovery = selectors.currentGameDiscovery(st) as { executable?: string } | undefined;
+  const game = selectors.currentGame(st) as { executable?: string } | undefined;
+  const exe = discovery?.executable ?? game?.executable;
+  if (exe === undefined) {
+    return undefined;
+  }
+  const name = path.basename(exe);
+  try {
+    const { stdout } = await execFileAsync(
+      "tasklist",
+      ["/FI", `IMAGENAME eq ${name}`, "/FO", "CSV", "/NH"],
+      { windowsHide: true },
+    );
+    return stdout.toLowerCase().includes(`"${name.toLowerCase()}"`) ? name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The checks deploy_mods and purge_mods share, run before anything is emitted. Found live
+ * in Vortex 2.7.0 (updateModDeployment / purgeMods): while the game or any tool started
+ * from Vortex is running (session.base.toolsRunning), both only show a "Can't deploy/purge
+ * while the game or a tool is running" toast and call back WITHOUT an error — a skipped
+ * operation is indistinguishable from a real one. Another mod operation already in
+ * progress is refused too. Returns the active profile id the operation will act on.
+ *
+ * toolsRunning alone isn't enough, see findRunningGameProcess — the game is also looked
+ * up in the OS process list.
+ */
+async function assertModOperationPossible(
+  api: IExtensionApi,
+  verb: "deploy" | "purge",
+  expectedContext: ExpectedContext | undefined,
+): Promise<string> {
+  assertExpectedContext(api, expectedContext);
+  const profileId = selectors.activeProfileId(state(api));
+  if (!profileId) {
+    throw new Error(`No active profile to ${verb}`);
+  }
+  const tracked = Object.keys(sessionBase(api).toolsRunning ?? {});
+  if (tracked.length > 0) {
+    throw new Error(
+      `Can't ${verb} while the game or a tool is running: ${tracked.join(", ")}. Vortex ` +
+        `would skip the ${verb} without reporting an error. Close it and retry.`,
+    );
+  }
+  const gameProcess = await findRunningGameProcess(api);
+  if (gameProcess !== undefined) {
+    throw new Error(
+      `Can't ${verb} while the game is running: ${gameProcess}. Vortex doesn't track it ` +
+        "(started outside Vortex, or before Vortex was restarted) and would try anyway, " +
+        "then get stuck on files the game holds open. Close it and retry.",
+    );
+  }
+  const busy = sessionBase(api).activity?.mods ?? [];
+  if (busy.length > 0) {
+    throw new Error(
+      `Vortex is busy with another mod operation (${busy.join(", ")}). Retry once it ` +
+        "finishes.",
+    );
+  }
+  return profileId;
+}
+
+/**
+ * Emits a deploy-mods / purge-mods style event (callback last) and waits for its
+ * callback, returning the elapsed ms. Either operation can stop and wait for the user
+ * (e.g. the "files changed outside Vortex" dialog) with no end — the callback never fires
+ * until they answer — so a timeout turns that into an error pointing at list_dialogs /
+ * list_external_changes.
+ */
+async function emitModOperation(
+  api: IExtensionApi,
+  verb: "deploy" | "purge",
+  event: string,
+  args: unknown[],
+  timeoutMs: number,
+): Promise<number> {
+  const started = Date.now();
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new Error(
+          `The ${verb} didn't finish within ${timeoutMs}ms — Vortex is most likely waiting ` +
+            "for the user in a dialog (check list_dialogs and list_external_changes). The " +
+            `${verb} is still pending in Vortex, not canceled.`,
+        ),
+      );
+    }, timeoutMs);
+    api.events.emit(event, ...args, (err: unknown) => {
+      clearTimeout(timer);
+      if (err) {
+        reject(err instanceof Error ? err : new Error(String(err)));
+      } else {
+        resolve();
+      }
+    });
+  });
+  return Date.now() - started;
+}
+
+/**
+ * Deploys the active profile via Vortex's own deploy-mods event (the same path as its
+ * Deploy button), then waits for the LOOT auto-sort that follows it. More than
+ * vortex_dispatch("deploy-mods", ["__CALLBACK__"]) can do in one call: the checks in
+ * assertModOperationPossible, the timeout in emitModOperation, and the sort — the load
+ * order is only final after it, and it starts after the callback.
+ */
+export async function deployMods(
+  api: IExtensionApi,
+  expectedContext?: ExpectedContext,
+  timeoutMs = MOD_OPERATION_TIMEOUT_MS,
+): Promise<DeployResult> {
+  const profileId = await assertModOperationPossible(api, "deploy", expectedContext);
+
+  // The sort itself was found live to take ~20ms, far shorter than any poll interval, so
+  // it's caught with a store subscription (set up before the deploy starts) instead.
+  const sorting = () => (sessionBase(api).activity?.plugins ?? []).includes("sorting");
+  let sortSeen = false;
+  const unsubscribe = store(api).subscribe(() => {
+    sortSeen ||= sorting();
+  });
+  try {
+    const deployMs = await emitModOperation(api, "deploy", "deploy-mods", [], timeoutMs);
+
+    const settings = state(api).settings as { plugins?: { autoSort?: boolean } };
+    let lootSort: DeployResult["lootSort"];
+    if (settings.plugins?.autoSort !== true) {
+      lootSort = "disabled";
+    } else if (!(await waitFor(() => sortSeen, LOOT_SORT_START_GRACE_MS))) {
+      lootSort = "not-started";
+    } else {
+      lootSort = (await waitFor(() => !sorting(), LOOT_SORT_TIMEOUT_MS)) ? "done" : "timeout";
+    }
+    return { profileId, deployMs, lootSort };
+  } finally {
+    unsubscribe();
+  }
+}
+
+/**
+ * Purges (undeploys) the active profile's mod files via Vortex's own purge-mods event —
+ * the same path as its Purge button — with the same checks and timeout as deployMods.
+ * allowFallback passes through to Vortex: if the normal purge fails, fall back to
+ * removing files by Vortex's deployment manifest.
+ */
+export async function purgeMods(
+  api: IExtensionApi,
+  expectedContext?: ExpectedContext,
+  timeoutMs = MOD_OPERATION_TIMEOUT_MS,
+  allowFallback = false,
+): Promise<PurgeResult> {
+  const profileId = await assertModOperationPossible(api, "purge", expectedContext);
+  const purgeMs = await emitModOperation(api, "purge", "purge-mods", [allowFallback], timeoutMs);
+  return { profileId, purgeMs };
 }
 
 interface DiscoveredTool {
