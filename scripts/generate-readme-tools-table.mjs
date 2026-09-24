@@ -53,6 +53,8 @@ const ACCESS_TIER = {
   poll_listener: "write",
   backup_state: "write",
   set_mods_enabled: "write",
+  deploy_mods: "write",
+  purge_mods: "write",
   launch_game: "write",
   vortex_restart: "write",
 };

@@ -31,6 +31,8 @@ vi.mock("@nexusmods/vortex-api", () => ({
     ]),
     notifications: vi.fn<() => unknown[]>(),
     installPathForGame: vi.fn<(state: unknown, gameId: string) => string | undefined>(),
+    currentGame: vi.fn(() => ({ id: "skyrimse", executable: "SkyrimSE.exe" })),
+    currentGameDiscovery: vi.fn(() => ({ path: "C:/games/skyrim" })),
   },
   util: {
     renderModName: vi.fn((mod: { id: string }) => mod.id),
@@ -51,11 +53,22 @@ vi.mock("@nexusmods/vortex-api", () => ({
   log: vi.fn(),
 }));
 
+// tasklist, as used by deployMods/purgeMods to find a running game process. Default: the
+// game isn't running (tasklist's own "no tasks" answer).
+vi.mock("node:child_process", () => ({
+  execFile: vi.fn(
+    (_file: string, _args: string[], _opts: unknown, cb: (err: null, out: unknown) => void) =>
+      cb(null, { stdout: "INFO: No tasks are running which match the specified criteria." }),
+  ),
+}));
+
+import { execFile } from "node:child_process";
 import { actions, fs, selectors, util } from "@nexusmods/vortex-api";
 import {
   backupState,
   checkNexusModUpdates,
   cloneProfile,
+  deployMods,
   describeApi,
   dispatchAction,
   findMissingDeployedFiles,
@@ -82,6 +95,7 @@ import {
   listRuntimeErrors,
   listUnsolvedConflicts,
   pollListener,
+  purgeMods,
   queryStatePath,
   querySelector,
   restartVortex,
@@ -489,6 +503,193 @@ describe("vortexControl: mods", () => {
       }),
     ).rejects.toThrow(/Active profile changed/);
     expect(actions.setModsEnabled).not.toHaveBeenCalled();
+  });
+});
+
+// A store whose subscribe() works like Redux's, so the test can play out the LOOT sort
+// (activity.plugins gains then loses "sorting") the way gamebryo-plugin-management does.
+function fakeModOperationApi(
+  base: { toolsRunning?: Record<string, unknown>; activity?: Record<string, string[]> } = {},
+  autoSort = true,
+) {
+  vi.mocked(selectors.activeProfileId).mockReturnValue("p1");
+  const session = { toolsRunning: {}, activity: { mods: [], plugins: [] }, ...base };
+  const listeners = new Set<() => void>();
+  const setPluginActivity = (activity: string[]) => {
+    session.activity = { ...session.activity, plugins: activity };
+    listeners.forEach((l) => l());
+  };
+  const emit = vi.fn();
+  const api = {
+    store: {
+      getState: () => ({ session: { base: session }, settings: { plugins: { autoSort } } }),
+      dispatch: vi.fn(),
+      subscribe: (l: () => void) => {
+        listeners.add(l);
+        return () => listeners.delete(l);
+      },
+    },
+    events: { emit },
+  } as never;
+  return { api, emit, listeners, setPluginActivity };
+}
+
+describe("vortexControl: deployMods", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("refuses to deploy while the game or a tool is running, without emitting", async () => {
+    // Regression test for the live finding: Vortex's deploy-mods only toasts and calls
+    // back WITHOUT an error in this case, so a skipped deploy looked like a real one.
+    const { api, emit } = fakeModOperationApi({
+      toolsRunning: { "c:/games/skyrim/skse64_loader.exe": {} },
+    });
+
+    await expect(deployMods(api)).rejects.toThrow(/game or a tool is running: .*skse64_loader/);
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("refuses to deploy while the game runs even if Vortex's toolsRunning missed it", async () => {
+    // Regression test for the live finding: after a Vortex restart with the game still
+    // running, toolsRunning stayed empty (ProcessMonitor only polls once it's non-empty),
+    // so the operation went ahead and hung on "File busy" dialogs.
+    vi.mocked(execFile).mockImplementationOnce(((
+      _file: string,
+      _args: string[],
+      _opts: unknown,
+      cb: (err: null, out: unknown) => void,
+    ) => cb(null, { stdout: '"SkyrimSE.exe","15700","Console","1","6,794,600 K"' })) as never);
+    const { api, emit } = fakeModOperationApi();
+
+    await expect(deployMods(api)).rejects.toThrow(
+      /Can't deploy while the game is running: SkyrimSE\.exe\. Vortex doesn't track it/,
+    );
+    expect(execFile).toHaveBeenCalledWith(
+      "tasklist",
+      ["/FI", "IMAGENAME eq SkyrimSE.exe", "/FO", "CSV", "/NH"],
+      expect.anything(),
+      expect.any(Function),
+    );
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("refuses to deploy while another mod operation is in progress", async () => {
+    const { api, emit } = fakeModOperationApi({ activity: { mods: ["installing"], plugins: [] } });
+
+    await expect(deployMods(api)).rejects.toThrow(/busy with another mod operation \(installing\)/);
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("rejects when expectedActiveProfileId no longer matches, without emitting", async () => {
+    const { api, emit } = fakeModOperationApi();
+
+    await expect(deployMods(api, { activeProfileId: "other" })).rejects.toThrow(
+      /Active profile changed/,
+    );
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("waits for the LOOT sort that follows the deploy and reports it done", async () => {
+    const { api, emit, listeners, setPluginActivity } = fakeModOperationApi();
+    emit.mockImplementation((_event: string, cb: (err: unknown) => void) => {
+      cb(null);
+      // The sort starts after the callback and is over within one tick — far too short
+      // for polling to see, which is why deployMods subscribes to the store instead.
+      setTimeout(() => {
+        setPluginActivity(["sorting"]);
+        setPluginActivity([]);
+      }, 50);
+    });
+
+    const result = await deployMods(api);
+
+    expect(emit).toHaveBeenCalledWith("deploy-mods", expect.any(Function));
+    expect(result).toEqual({ profileId: "p1", deployMs: expect.any(Number), lootSort: "done" });
+    expect(listeners.size).toBe(0);
+  });
+
+  it("doesn't wait for a sort when LOOT auto-sort is off", async () => {
+    const { api, emit } = fakeModOperationApi({}, false);
+    emit.mockImplementation((_event: string, cb: (err: unknown) => void) => cb(null));
+
+    expect((await deployMods(api)).lootSort).toBe("disabled");
+  });
+
+  it("reports not-started when no sort shows up within the grace period", async () => {
+    vi.useFakeTimers();
+    const { api, emit } = fakeModOperationApi();
+    emit.mockImplementation((_event: string, cb: (err: unknown) => void) => cb(null));
+
+    const pending = deployMods(api);
+    await vi.advanceTimersByTimeAsync(2_500);
+
+    expect((await pending).lootSort).toBe("not-started");
+  });
+
+  it("passes a deploy error through and unsubscribes", async () => {
+    const { api, emit, listeners } = fakeModOperationApi();
+    emit.mockImplementation((_event: string, cb: (err: unknown) => void) =>
+      cb(new Error("Game no longer available")),
+    );
+
+    await expect(deployMods(api)).rejects.toThrow(/Game no longer available/);
+    expect(listeners.size).toBe(0);
+  });
+
+  it("times out with a pointer to the dialog tools when the deploy never calls back", async () => {
+    vi.useFakeTimers();
+    const { api, listeners } = fakeModOperationApi();
+
+    const pending = deployMods(api, undefined, 5_000);
+    const assertion = expect(pending).rejects.toThrow(
+      /within 5000ms .*list_dialogs and list_external_changes/,
+    );
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await assertion;
+    expect(listeners.size).toBe(0);
+  });
+});
+
+describe("vortexControl: purgeMods", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("refuses to purge while the game or a tool is running, without emitting", async () => {
+    // Same live finding as deploy: Vortex's purgeMods only toasts and calls back without
+    // an error while a tool runs.
+    const { api, emit } = fakeModOperationApi({ toolsRunning: { "skyrimse.exe": {} } });
+
+    await expect(purgeMods(api)).rejects.toThrow(
+      /Can't purge while the game or a tool is running: skyrimse\.exe/,
+    );
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("emits purge-mods with allowFallback and resolves once the callback fires", async () => {
+    const { api, emit } = fakeModOperationApi();
+    emit.mockImplementation((_event: string, _fallback: boolean, cb: (err: unknown) => void) =>
+      cb(null),
+    );
+
+    expect(await purgeMods(api)).toEqual({ profileId: "p1", purgeMs: expect.any(Number) });
+    expect(emit).toHaveBeenLastCalledWith("purge-mods", false, expect.any(Function));
+
+    await purgeMods(api, undefined, undefined, true);
+    expect(emit).toHaveBeenLastCalledWith("purge-mods", true, expect.any(Function));
+  });
+
+  it("times out with a pointer to the dialog tools when the purge never calls back", async () => {
+    vi.useFakeTimers();
+    const { api } = fakeModOperationApi();
+
+    const pending = purgeMods(api, undefined, 5_000);
+    const assertion = expect(pending).rejects.toThrow(/purge didn't finish within 5000ms/);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await assertion;
   });
 });
 
