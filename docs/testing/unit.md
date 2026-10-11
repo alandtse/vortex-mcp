@@ -23,4 +23,6 @@ DOM logic belongs with the extension's jsdom tests. A simulated DOM can check a 
 
 For collection startup, run `pnpm exec vitest run src/uiAutomation.test.ts harness/src/collectionStartup.test.ts`. These tests cover a large page whose snapshot stops before the dialog, Vortex's nested dialog wrappers, two separate dialogs with identical text, one successful **Install Now** click, and failures without another click. They need neither a game nor a Nexus account; they do not install a real collection.
 
+The DOM click tests also check buttons that change their label or role during the action. The click result must describe the original target so a successful transition to another dialog step does not look like a wrong click.
+
 When changing measurements, test the timing arithmetic and status handling with unit tests, then verify the actual app action separately.

@@ -1555,7 +1555,8 @@ function registerUiWriteTools(server: McpServer, api: IExtensionApi): void {
         "toggles, table row selection — listen on mousedown and ignore a bare click event. " +
         "Refuses to click an invisible or disabled element with an explanatory error instead of " +
         "silently doing nothing; pass requireActionable=false to force it anyway. Scrolls the " +
-        "element into view first. This performs a REAL action in a REAL Vortex: it can start " +
+        "element into view first. Returns the target's role/name before input handlers run; " +
+        "a handler may immediately relabel or remove it. This performs a REAL action in a REAL Vortex: it can start " +
         "downloads, remove mods, or launch a game.",
       inputSchema: z.object({
         ...uiTargetSchema,

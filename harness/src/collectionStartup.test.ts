@@ -157,6 +157,7 @@ it.each([
     });
     for (const button of document.querySelectorAll("[data-native-start]"))
       button.addEventListener("click", () => {
+        button.textContent = "Yes";
         driver.step = "installing";
       });
     expect(nativeUi.snapshot().truncated).toBe(true);

@@ -123,6 +123,9 @@ Check physical container and enabled-button uniqueness before
 the click, then re-snapshot the selected container because scanning invalidates earlier refs.
 Recheck exact driver ownership, query step and finished preparation after that scan and before
 the action; the client UI lock does not prevent Vortex's native driver from changing.
+`ui_click` reports the target role/name captured after actionability/confirmation checks and
+before the input sequence. Native handlers can reuse Install Now as Yes for profile confirmation.
+Inspect the next UI/driver state separately; returned target identity is not workflow completion.
 Full-page trees can truncate before the footer on large Mods
 pages. Missing/ambiguous collection-added dialogs and failed clicks fail the attempt; no action
 retry or driver recovery is performed. `collectionStartup.test.ts` exercises this wiring with the

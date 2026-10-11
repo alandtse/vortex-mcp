@@ -21,6 +21,9 @@ separately observable dialog footer. DOM coverage verifies the default 1,500-nod
 startup coverage includes stock nested dialog-role containers and separate identical sibling
 dialogs through actual DOM snapshots. It checks one click, stacked dialogs, missing/ambiguous dialogs and transport
 failure without a second action. These checks do not establish a real collection completed.
+Click identity tests exercise handlers that relabel/change role during mousedown or click;
+returned metadata describes the target before the sequence. Collection startup also exercises
+native DOM label replacement through its MCP response adapter.
 
 Human tests/benchmark run instructions live in `/docs/testing`; update those with this manual
 and the source-generated package/helper references when selection or prerequisites change.

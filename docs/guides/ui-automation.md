@@ -37,6 +37,8 @@ Large pages can reach the snapshot's node limit before a dialog's footer. Inspec
 
 `ui.clickByName(client, {role: "button", name: "Manage"})` takes a fresh snapshot and requires one matching control. Use the actual label on your screen. A string name matches exactly, ignoring case; a regular expression supports a pattern. An ambiguous match needs a more precise role, `testId`, or scope.
 
+The click result identifies the button before its input handlers run. For example, Vortex can change **Install Now** to **Yes** while asking to switch profiles. The result still reports **Install Now**; take a fresh snapshot to inspect the next step. That result proves which control received the action, not that installation finished.
+
 ## Time a table action
 
 For table benchmarks, use [the action helpers](../testing/adding-benchmarks.md). They require an observable consequence and record timing only after that consequence appears.

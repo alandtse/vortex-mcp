@@ -735,6 +735,10 @@ export function click(options: ClickOptions): { ref?: string; role: string; name
   // paragraphs. Validate after scrolling and before dispatching any input.
   if (options.confirmation !== undefined) assertDialogConfirmation(el, options.confirmation);
 
+  // Input handlers can reuse this button for the next dialog step or unmount it.
+  // Report the element that receives the sequence, before those handlers run.
+  const result = { ref: options.ref, role: roleOf(el), name: accessibleName(el) };
+
   const rect = el.getBoundingClientRect();
   const clientX = Math.round(rect.left + rect.width / 2);
   const clientY = Math.round(rect.top + rect.height / 2);
@@ -771,7 +775,7 @@ export function click(options: ClickOptions): { ref?: string; role: string; name
   }
   if (clickCount === 2) dispatchMouse(el, "dblclick", { ...init, detail: 2 });
 
-  return { ref: options.ref, role: roleOf(el), name: accessibleName(el) };
+  return result;
 }
 
 function dispatchMouse(el: Element, type: string, init: MouseEventInit): void {

@@ -394,6 +394,25 @@ describe("ref lifecycle", () => {
 });
 
 describe("click", () => {
+  it.each(["mousedown", "click"])(
+    "reports the acted-on control before %s replaces its label",
+    (event) => {
+      setBody("<button>Install Now</button>");
+      const el = document.querySelector("button") as HTMLElement;
+      stubRect(el, { width: 100, height: 30 });
+      let actions = 0;
+      el.addEventListener(event, () => {
+        actions++;
+        el.textContent = "Yes";
+        el.setAttribute("role", "link");
+      });
+      const ref = snapshot().tree[0].ref;
+      expect(click({ ref })).toEqual({ ref, role: "button", name: "Install Now" });
+      expect(actions).toBe(1);
+      expect(el.textContent).toBe("Yes");
+    },
+  );
+
   it("fires mousedown before click, so mousedown-only widgets respond", () => {
     setBody("<button>Deploy</button>");
     const el = document.querySelector("button") as HTMLElement;
