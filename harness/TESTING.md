@@ -18,7 +18,8 @@ These tests do not download tools or contact Nexus.
 
 Collection-start regressions use the real UI helpers with a bounded root snapshot and a
 separately observable dialog footer. DOM coverage verifies the default 1,500-node limit;
-startup coverage checks one click, stacked dialogs, missing/ambiguous dialogs and transport
+startup coverage includes stock nested dialog-role containers and separate identical sibling
+dialogs through actual DOM snapshots. It checks one click, stacked dialogs, missing/ambiguous dialogs and transport
 failure without a second action. These checks do not establish a real collection completed.
 
 Human tests/benchmark run instructions live in `/docs/testing`; update those with this manual

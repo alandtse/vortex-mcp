@@ -116,7 +116,10 @@ keeps its finish-dialog policy consistent through both passes. `collection_statu
 counts explicit `ignored:false` rules; absent flags do not prove the AE choice. Never ignore
 required members; changed member counts or collection identity fail the run.
 Collection startup validates the exact driver, reads active dialog text, and clicks Install Now
-through scoped dialog snapshots. Check physical container and enabled-button uniqueness before
+through scoped dialog snapshots. Count outer dialog containers: stock react-overlays wraps
+Bootstrap's modal in another dialog-role element, which is still one physical dialog.
+Separate sibling containers remain ambiguous even if their text is identical.
+Check physical container and enabled-button uniqueness before
 the click, then re-snapshot the selected container because scanning invalidates earlier refs.
 Recheck exact driver ownership, query step and finished preparation after that scan and before
 the action; the client UI lock does not prevent Vortex's native driver from changing.

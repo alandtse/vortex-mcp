@@ -1,4 +1,6 @@
+// @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
+import * as nativeUi from "../../src/uiAutomation";
 import { installCollection } from "./collections";
 import type { VortexMcpClient } from "./mcpClient";
 afterEach(() => {
@@ -9,6 +11,8 @@ afterEach(() => {
 it.each([
   "query",
   "stacked-dialogs",
+  "nested-dialog",
+  "nested-ambiguous-dialogs",
   "missing-dialog",
   "ambiguous-dialogs",
   "duplicate-buttons",
@@ -91,6 +95,8 @@ it.each([
             "preparation-unobservable",
             "query-vanishes",
             "stacked-dialogs",
+            "nested-dialog",
+            "nested-ambiguous-dialogs",
             "missing-dialog",
             "ambiguous-dialogs",
             "duplicate-buttons",
@@ -126,6 +132,38 @@ it.each([
   };
   let generation = 0;
   let latestRef = "";
+  const nested = mode.startsWith("nested-");
+  if (nested) {
+    const dialog =
+      '<div role="dialog"><div role="dialog" class="modal in">' +
+      '<div class="modal-dialog"><div class="modal-content" role="document">' +
+      "<h4>Skyrim Special Edition collection added</h4><p>Fixture</p>" +
+      "<button>Later</button><button data-native-start>Install Now</button>" +
+      "</div></div></div></div>";
+    document.body.innerHTML =
+      Array.from({ length: 1600 }, (_, i) => `<button>Mod ${i}</button>`).join("") +
+      dialog +
+      (mode === "nested-ambiguous-dialogs" ? dialog : "");
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 100,
+      height: 30,
+      left: 0,
+      top: 0,
+      right: 100,
+      bottom: 30,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    for (const button of document.querySelectorAll("[data-native-start]"))
+      button.addEventListener("click", () => {
+        driver.step = "installing";
+      });
+    expect(nativeUi.snapshot().truncated).toBe(true);
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(
+      mode === "nested-ambiguous-dialogs" ? 4 : 2,
+    );
+  }
   const scopedReads = new Map<number, number>();
   const call = vi.fn(async (tool: string, args?: Record<string, unknown>) => {
     if (tool === "nexus_auth_status") return { oauthPresent: true, oauthRefreshable: true };
@@ -136,6 +174,8 @@ it.each([
     if (tool === "collection_download_failures") return [];
     const collectionDialog = "Skyrim Special Edition collection addedFixtureLaterInstall Now";
     const otherDialog = "Another operationInstall Now";
+    if (tool === "ui_active_dialogs" && nested)
+      return nativeUi.activeDialogElements().map(({ text }) => text);
     if (tool === "ui_active_dialogs")
       return mode === "missing-dialog"
         ? [otherDialog]
@@ -143,11 +183,14 @@ it.each([
           ? [otherDialog, collectionDialog]
           : [collectionDialog];
     if (tool === "ui_snapshot") {
+      if (nested) return nativeUi.snapshot(args);
       const index = Number(args?.index ?? 0);
       if (args?.selector !== undefined) {
         if (mode === "snapshot-error") throw new Error("Snapshot transport rejected");
         if (
-          args.selector !== '[role="dialog"]' ||
+          !['[role="dialog"]', '[role="dialog"]:not([role="dialog"] [role="dialog"])'].includes(
+            String(args.selector),
+          ) ||
           index >= (["stacked-dialogs", "ambiguous-dialogs"].includes(mode) ? 2 : 1)
         )
           throw new Error("No element matches selector");
@@ -190,6 +233,11 @@ it.each([
       };
     }
     if (tool === "ui_click") {
+      if (nested) {
+        const target = { ref: String(args?.ref) };
+        expect(nativeUi.resolveTarget(target).hasAttribute("data-native-start")).toBe(true);
+        return nativeUi.click(target);
+      }
       expect(args?.ref).toBe(latestRef);
       if (mode === "click-error") throw new Error("Native click rejected");
       driver.step = "installing";
@@ -273,6 +321,7 @@ it.each([
     "preparation-unobservable",
     "missing-dialog",
     "ambiguous-dialogs",
+    "nested-ambiguous-dialogs",
     "duplicate-buttons",
     "disabled-button",
     "dialog-drift",
@@ -297,6 +346,7 @@ it.each([
       "click-error",
       "preparation-changes",
       "stacked-dialogs",
+      "nested-dialog",
       "wrong-click-target",
     ].includes(mode)
       ? 1
@@ -308,7 +358,8 @@ it.each([
         ([tool, args]) => tool === "ui_snapshot" && args?.selector === undefined,
       ),
     ).toEqual([]);
-    expect(clicks[0]![1]?.ref).toMatch(mode === "stacked-dialogs" ? /^start-1-/ : /^start-0-/);
+    if (!nested)
+      expect(clicks[0]![1]?.ref).toMatch(mode === "stacked-dialogs" ? /^start-1-/ : /^start-0-/);
   }
   if ("value" in result) expect(result.value.warnings).toEqual([]);
   if (mode === "dispatch-error" && "error" in result)

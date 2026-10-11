@@ -862,7 +862,10 @@ async function startInstallDriver(
       // Large mod libraries exhaust a full-page snapshot before the modal footer.
       // Scope the lookup to the owned driver's dialog and make only one click.
       const dialogText = dialogs[0]!;
-      for (const selector of ['[role="dialog"]', ".modal.in", ".modal.show", "dialog[open]"]) {
+      for (const container of ['[role="dialog"]', ".modal.in", ".modal.show", "dialog[open]"]) {
+        // Stock react-overlays wraps Bootstrap's own role=dialog. Count the
+        // outer container once, while keeping separate sibling dialogs distinct.
+        const selector = `${container}:not(${container} ${container})`;
         const matches: number[] = [];
         for (let index = 0; index <= 4; index++) {
           const scoped = await snapshotIfPresent(mcp, selector, index);

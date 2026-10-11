@@ -45,4 +45,4 @@ This archive's `Data/textures` destination belongs to the disposable test game. 
 
 Real collection runs need [OAuth and download access](../getting-started/setup.md). Use the [benchmark runner](../testing/benchmarks.md) with a pinned revision, cache mode, and explicit game fixture. See the [proposal matrix](../testing/proposal.md) for intended real-data coverage.
 
-Doodlebot presses **Install Now** in the collection's own dialog, even with a large mod library open behind it. It rechecks that the collection still owns the install driver before clicking. If that dialog is missing, ambiguous, or the click fails, the run fails and keeps its evidence. It does not retry the click or restart installation.
+Doodlebot presses **Install Now** in the collection's own dialog, even with a large mod library open behind it. It treats Vortex's nested dialog wrappers as one dialog and rechecks that the collection still owns the install driver before clicking. Two separate matching dialogs, a missing dialog, or a failed click fail the run and keep its evidence. It does not retry the click or restart installation.

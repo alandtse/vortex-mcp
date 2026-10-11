@@ -23,7 +23,7 @@ The suite runs one worker and writes an HTML report to `harness/playwright-repor
 
 Account and game-specific tests are separate. Do not infer that a local synthetic test covers a real collection or engine page.
 
-The repository gate checks collection startup with simulated UI responses and DOM snapshots, including large pages, stacked dialogs, and failed clicks without another action. A real collection run must still reach its verified installation and deployment result.
+The repository gate checks collection startup with simulated UI responses and DOM snapshots, including large pages, nested dialog wrappers, separate matching dialogs, and failed clicks without another action. A real collection run must still reach its verified installation and deployment result.
 
 ## Add the right test
 
