@@ -1,20 +1,24 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { installCollection } from "./collections";
 import type { VortexMcpClient } from "./mcpClient";
-import { clickByName } from "./uiDriver";
-
-vi.mock("./uiDriver", async (original) => ({
-  ...(await original<typeof import("./uiDriver")>()),
-  clickByName: vi.fn(async () => undefined),
-}));
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
-  vi.mocked(clickByName).mockReset();
 });
 
 it.each([
   "query",
+  "stacked-dialogs",
+  "missing-dialog",
+  "ambiguous-dialogs",
+  "duplicate-buttons",
+  "disabled-button",
+  "dialog-drift",
+  "snapshot-error",
+  "scan-owner-drift",
+  "scan-step-drift",
+  "scan-preparation-drift",
+  "wrong-click-target",
   "start",
   "installing",
   "disclaimer",
@@ -86,6 +90,17 @@ it.each([
             "preparation-changes",
             "preparation-unobservable",
             "query-vanishes",
+            "stacked-dialogs",
+            "missing-dialog",
+            "ambiguous-dialogs",
+            "duplicate-buttons",
+            "disabled-button",
+            "dialog-drift",
+            "snapshot-error",
+            "scan-owner-drift",
+            "scan-step-drift",
+            "scan-preparation-drift",
+            "wrong-click-target",
           ].includes(mode)
         ? "query"
         : mode,
@@ -109,6 +124,9 @@ it.each([
     attributes: { collectionSlug: "wanted", revisionNumber: 2 },
     rules: [{ type: "requires", reference: { tag: "member" } }],
   };
+  let generation = 0;
+  let latestRef = "";
+  const scopedReads = new Map<number, number>();
   const call = vi.fn(async (tool: string, args?: Record<string, unknown>) => {
     if (tool === "nexus_auth_status") return { oauthPresent: true, oauthRefreshable: true };
     if (tool === "list_notifications")
@@ -116,6 +134,68 @@ it.each([
         ? [{ id: "duplicate", type: "warning", message: "Already installing a collection" }]
         : [];
     if (tool === "collection_download_failures") return [];
+    const collectionDialog = "Skyrim Special Edition collection addedFixtureLaterInstall Now";
+    const otherDialog = "Another operationInstall Now";
+    if (tool === "ui_active_dialogs")
+      return mode === "missing-dialog"
+        ? [otherDialog]
+        : mode === "stacked-dialogs"
+          ? [otherDialog, collectionDialog]
+          : [collectionDialog];
+    if (tool === "ui_snapshot") {
+      const index = Number(args?.index ?? 0);
+      if (args?.selector !== undefined) {
+        if (mode === "snapshot-error") throw new Error("Snapshot transport rejected");
+        if (
+          args.selector !== '[role="dialog"]' ||
+          index >= (["stacked-dialogs", "ambiguous-dialogs"].includes(mode) ? 2 : 1)
+        )
+          throw new Error("No element matches selector");
+        scopedReads.set(index, (scopedReads.get(index) ?? 0) + 1);
+        if ((scopedReads.get(index) ?? 0) > 1) {
+          if (mode === "scan-owner-drift") driver.collectionId = "other";
+          if (mode === "scan-step-drift") driver.step = "installing";
+          if (mode === "scan-preparation-drift") driver.preparing = true;
+        }
+      }
+      const text =
+        (mode === "stacked-dialogs" && index === 0) ||
+        (mode === "dialog-drift" && (scopedReads.get(index) ?? 0) > 1)
+          ? otherDialog
+          : collectionDialog;
+      latestRef = `start-${String(index)}-${String(++generation)}`;
+      const buttons = [
+        {
+          ref: latestRef,
+          role: "button",
+          name: "Install Now",
+          disabled: mode === "disabled-button",
+        },
+      ];
+      if (mode === "duplicate-buttons") buttons.push({ ...buttons[0]!, ref: "duplicate" });
+      // Model the actual failure: the root snapshot stops in the mod library;
+      // the separately scoped dialog contains the visible footer button.
+      return {
+        generation,
+        title: "Vortex",
+        viewport: { width: 1280, height: 800 },
+        nodeCount: args?.selector === undefined ? 1500 : 1,
+        truncated: args?.selector === undefined,
+        activeDialogs: [text],
+        rootText: args?.selector === undefined ? undefined : text,
+        tree:
+          args?.selector === undefined
+            ? [{ ref: "background", role: "button", name: "Remove" }]
+            : buttons,
+      };
+    }
+    if (tool === "ui_click") {
+      expect(args?.ref).toBe(latestRef);
+      if (mode === "click-error") throw new Error("Native click rejected");
+      driver.step = "installing";
+      if (mode === "wrong-click-target") return { role: "text", name: "Install Now" };
+      return { role: "button", name: "Install Now" };
+    }
     if (tool === "collection_install_state") {
       observations++;
       if (observations === 3) {
@@ -165,11 +245,6 @@ it.each([
       ];
     throw new Error(`Unexpected tool ${tool}`);
   });
-  vi.mocked(clickByName).mockImplementation(async () => {
-    if (mode === "click-error") throw new Error("Native click rejected");
-    driver.step = "installing";
-    return {} as never;
-  });
   const outcome = installCollection(
     { call } as unknown as VortexMcpClient,
     "nxm://skyrimspecialedition/collections/wanted/revisions/2",
@@ -196,6 +271,16 @@ it.each([
     "missing-preparation",
     "collectionless-start",
     "preparation-unobservable",
+    "missing-dialog",
+    "ambiguous-dialogs",
+    "duplicate-buttons",
+    "disabled-button",
+    "dialog-drift",
+    "snapshot-error",
+    "scan-owner-drift",
+    "scan-step-drift",
+    "scan-preparation-drift",
+    "wrong-click-target",
   ].includes(mode);
   expect(result).toHaveProperty(
     fails ? "error" : "value.complete",
@@ -203,9 +288,28 @@ it.each([
   );
   const resumes = call.mock.calls.filter(([, args]) => args?.action === "resume-collection");
   expect(resumes).toHaveLength(["idle", "dispatch-error", "closed-review"].includes(mode) ? 1 : 0);
-  expect(clickByName).toHaveBeenCalledTimes(
-    ["query", "preparing", "fresh", "click-error", "preparation-changes"].includes(mode) ? 1 : 0,
+  const clicks = call.mock.calls.filter(([tool]) => tool === "ui_click");
+  expect(clicks).toHaveLength(
+    [
+      "query",
+      "preparing",
+      "fresh",
+      "click-error",
+      "preparation-changes",
+      "stacked-dialogs",
+      "wrong-click-target",
+    ].includes(mode)
+      ? 1
+      : 0,
   );
+  if (clicks.length > 0) {
+    expect(
+      call.mock.calls.filter(
+        ([tool, args]) => tool === "ui_snapshot" && args?.selector === undefined,
+      ),
+    ).toEqual([]);
+    expect(clicks[0]![1]?.ref).toMatch(mode === "stacked-dialogs" ? /^start-1-/ : /^start-0-/);
+  }
   if ("value" in result) expect(result.value.warnings).toEqual([]);
   if (mode === "dispatch-error" && "error" in result)
     expect(result.error.message).toContain("transport rejected dispatch");

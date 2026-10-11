@@ -23,6 +23,8 @@ The suite runs one worker and writes an HTML report to `harness/playwright-repor
 
 Account and game-specific tests are separate. Do not infer that a local synthetic test covers a real collection or engine page.
 
+The repository gate checks collection startup with simulated UI responses and DOM snapshots, including large pages, stacked dialogs, and failed clicks without another action. A real collection run must still reach its verified installation and deployment result.
+
 ## Add the right test
 
 Use [unit tests](unit.md) for pure logic and DOM helpers. Use [real-app tests](integration.md) for Vortex integration and deployed files. Use [benchmarks](benchmarks.md) to compare observable performance.

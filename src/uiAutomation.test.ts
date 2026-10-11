@@ -338,6 +338,21 @@ describe("snapshot", () => {
     expect(result.truncated).toBe(true);
     expect(result.nodeCount).toBe(5);
   });
+
+  it("finds the collection footer in a scoped snapshot after the page reaches its node limit", () => {
+    setBody(
+      Array.from({ length: 1600 }, (_, index) => `<button>Mod ${String(index)}</button>`).join("") +
+        '<div role="dialog"><h4>Skyrim Special Edition collection added</h4>' +
+        "<button>Later</button><button>Install Now</button></div>",
+    );
+    const page = snapshot();
+    expect(page.truncated).toBe(true);
+    expect(flatten(page.tree).some((node) => node.name === "Install Now")).toBe(false);
+    expect(page.activeDialogs[0]).toContain("collection added");
+    const dialog = snapshot({ selector: '[role="dialog"]' });
+    expect(dialog.truncated).toBe(false);
+    expect(flatten(dialog.tree).filter((node) => node.name === "Install Now")).toHaveLength(1);
+  });
 });
 
 describe("ref lifecycle", () => {

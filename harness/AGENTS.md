@@ -115,6 +115,15 @@ reapplies the choice if released Vortex regenerates that exact pinned manifest's
 keeps its finish-dialog policy consistent through both passes. `collection_status.optionalSelected`
 counts explicit `ignored:false` rules; absent flags do not prove the AE choice. Never ignore
 required members; changed member counts or collection identity fail the run.
+Collection startup validates the exact driver, reads active dialog text, and clicks Install Now
+through scoped dialog snapshots. Check physical container and enabled-button uniqueness before
+the click, then re-snapshot the selected container because scanning invalidates earlier refs.
+Recheck exact driver ownership, query step and finished preparation after that scan and before
+the action; the client UI lock does not prevent Vortex's native driver from changing.
+Full-page trees can truncate before the footer on large Mods
+pages. Missing/ambiguous collection-added dialogs and failed clicks fail the attempt; no action
+retry or driver recovery is performed. `collectionStartup.test.ts` exercises this wiring with the
+real UI helpers, including a stacked unrelated dialog and a truncated root snapshot.
 Collection timing uses `watch_state_changes` scalar deltas, not whole state snapshots. It preserves
 all changed member IDs, ignores byte-progress churn, drains up to four pages of 128 entries per
 listener each cycle and drains remaining pages at stop. Sequence gaps, subscription failures and

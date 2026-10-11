@@ -24,12 +24,13 @@ import {
   autoAdvanceFomods,
   autoAnswerDialogs,
   dialogPolicies,
-  clickByName,
   snapshot,
   snapshotIfPresent,
   openDialogs,
   clickInsideDialog,
   findNodes,
+  findOne,
+  snapshotIsDialog,
   type AnsweredDialog,
 } from "./uiDriver";
 import { withUiLock } from "./uiSession";
@@ -852,7 +853,52 @@ async function startInstallDriver(
       "The install driver does not own the requested collection after startup",
     );
   if (driver.step === "query") {
-    await clickByName(mcp, { role: "button", name: /^install now$/i });
+    await withUiLock(mcp, async () => {
+      const dialogs = (await openDialogs(mcp)).filter((text) => /collection added/i.test(text));
+      if (dialogs.length !== 1)
+        throw new CollectionError(
+          `Expected one collection-added dialog before starting installation, found ${String(dialogs.length)}`,
+        );
+      // Large mod libraries exhaust a full-page snapshot before the modal footer.
+      // Scope the lookup to the owned driver's dialog and make only one click.
+      const dialogText = dialogs[0]!;
+      for (const selector of ['[role="dialog"]', ".modal.in", ".modal.show", "dialog[open]"]) {
+        const matches: number[] = [];
+        for (let index = 0; index <= 4; index++) {
+          const scoped = await snapshotIfPresent(mcp, selector, index);
+          if (scoped === undefined || scoped.nodeCount === 0) break;
+          if (index === 4)
+            throw new CollectionError(
+              "Too many open dialog containers to identify collection startup",
+            );
+          if (snapshotIsDialog(scoped, dialogText)) matches.push(index);
+        }
+        // Active dialog text is deduplicated; inspect physical containers too.
+        if (matches.length > 1)
+          throw new CollectionError("Ambiguous collection-added dialog containers");
+        if (matches.length === 0) continue;
+        // Scanning invalidates refs. Re-snapshot and revalidate before the one action.
+        const scoped = await snapshot(mcp, selector, matches[0]);
+        if (!snapshotIsDialog(scoped, dialogText))
+          throw new CollectionError("Collection-added dialog changed before startup");
+        const target = findOne(scoped, { role: "button", name: /^install now$/i });
+        const currentDriver = await observe();
+        if (
+          currentDriver.found !== true ||
+          currentDriver.collectionId !== modId ||
+          currentDriver.preparing !== false ||
+          currentDriver.step !== "query"
+        )
+          throw new CollectionError("Collection install driver changed before startup click");
+        const clicked = await mcp.call<{ name?: string; role?: string }>("ui_click", {
+          ref: target.ref,
+        });
+        if (clicked?.role !== "button" || !/^install now$/i.test(clicked.name ?? ""))
+          throw new CollectionError("Collection startup click did not target Install Now");
+        return;
+      }
+      throw new CollectionError("Collection-added dialog container is missing");
+    });
     report("clicked Install Now");
   } else report("driver already started; no additional start action");
 }

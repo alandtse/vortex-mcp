@@ -33,6 +33,8 @@ console.log(ui.flatten(screen.tree).map(({ role, name, text }) => ({ role, name,
 
 Import `clientFor` and `ui` from `./harness/src/kit`. A snapshot describes controls currently rendered by Vortex. It does not prove that an off-screen row, download, or deployed file exists.
 
+Large pages can reach the snapshot's node limit before a dialog's footer. Inspect the dialog directly with `ui.snapshot(client, '[role="dialog"]')`. Collection startup does this automatically, checks that the dialog and **Install Now** button are unique, and takes a fresh scoped snapshot before clicking.
+
 `ui.clickByName(client, {role: "button", name: "Manage"})` takes a fresh snapshot and requires one matching control. Use the actual label on your screen. A string name matches exactly, ignoring case; a regular expression supports a pattern. An ambiguous match needs a more precise role, `testId`, or scope.
 
 ## Time a table action
