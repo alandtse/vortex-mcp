@@ -414,6 +414,7 @@ export class BenchmarkSession {
         (await modsStillInstalling(this.instance.mcp, this.gameId)).length === 0,
         "Warm prefill still has unfinished installers",
       );
+      await this.verifyInstalledStaging();
       await this.purge();
       const staging = await this.safeSelectorPath("installPathForGame");
       const records = await this.call<Record<string, { installationPath?: string }>>(
@@ -768,11 +769,68 @@ export class BenchmarkSession {
       !(await needsDeployment(this.instance.mcp, this.gameId)),
       "Deployment incomplete at ready boundary",
     );
+    if (this.dataset === "real") {
+      const validate = () => this.verifyInstalledStaging();
+      if (this.measurementDepth > 0 || this.collectionTiming) this.validations.push(validate);
+      else await validate();
+    }
     this.evidence.push({
       operation: "ready checked",
       gameLaunch: "excluded",
       observable: ready ?? "all sandbox mods installed and no pending deployment",
     });
+  }
+  private async verifyInstalledStaging(): Promise<void> {
+    const staging = await this.safeSelectorPath("installPathForGame");
+    const records = await this.call<Record<string, { state?: string; installationPath?: string }>>(
+      "vortex_query",
+      { path: ["persistent", "mods", this.gameId] },
+    );
+    const installed = Object.entries(records ?? {}).filter(([, mod]) => mod.state === "installed");
+    const failures: { modId: string; installationPath?: string; reason: string }[] = [];
+    for (const [modId, mod] of installed) {
+      try {
+        const relative = mod.installationPath;
+        if (
+          typeof relative !== "string" ||
+          relative.length === 0 ||
+          path.isAbsolute(relative) ||
+          path.win32.isAbsolute(relative) ||
+          /^[a-z]:/i.test(relative) ||
+          relative.split(/[\\/]/).includes("..")
+        )
+          throw new Error("Installed mod has no safe relative staging directory");
+        const folder = path.resolve(staging, relative.replace(/[\\/]/g, path.sep));
+        assertInside(staging, folder);
+        if (!(await fs.promises.lstat(folder)).isDirectory())
+          throw new Error("Installed mod staging path is not a directory");
+      } catch (error) {
+        failures.push({
+          modId,
+          installationPath: mod.installationPath,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    const verified = installed.length > 0 && failures.length === 0;
+    this.evidence.push({
+      operation: "installed staging verification",
+      verified,
+      installedRecords: installed.length,
+      directoriesPresent: installed.length - failures.length,
+      failures,
+      scope:
+        "Directory presence only; deployment verification separately compares manifest file bytes",
+      integrityValidation: "outside timed action window",
+    });
+    this.assert(
+      installed.length > 0,
+      "No installed mod records available for staging verification",
+    );
+    this.assert(
+      verified,
+      `Installed staging verification failed for ${failures.length}/${installed.length} mod records; inspect evidence for paths`,
+    );
   }
   async restartToMods(): Promise<void> {
     const definition = this.manifest?.tables?.mods ?? defaults.mods!;

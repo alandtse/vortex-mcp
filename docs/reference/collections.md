@@ -127,6 +127,10 @@ export interface SkyrimSnapshotOptions {
 
 In a real session, `addCollection()` installs once, `deploy()` deploys and `verifyReady()` checks configured files. B1–B5 supply the complete workflow, including native UI completion. [Run a collection](../getting-started/setup.md) covers preparation and install policy; [results](../testing/results.md) explains warnings and failure evidence.
 
+Warm-cache preparation checks that every installed mod record has a regular staging directory before purging the prefill. `verifyReady()` performs the same check for real collections. Missing, linked or unsafe directories fail even when Vortex's counters and UI say the collection is complete. The evidence entry `installed staging verification` identifies affected records; the fixture is retained without repair or another install attempt.
+
+Directory presence cannot prove that every installer output is correct. Deployment verification separately compares the file bytes listed in Vortex's deployment manifests. These checks run outside the timed action window, and a failure prevents the sample from being accepted.
+
 Pause/resume belongs in explicit pause tests or operator controls. It cannot recover failed members. Ordinary automation performs no recovery.
 
 ## Restart a real collection from scratch

@@ -26,3 +26,5 @@ For collection startup, run `pnpm exec vitest run src/uiAutomation.test.ts harne
 The DOM click tests also check buttons that change their label or role during the action. The click result must describe the original target so a successful transition to another dialog step does not look like a wrong click.
 
 When changing measurements, test the timing arithmetic and status handling with unit tests, then verify the actual app action separately.
+
+Run `pnpm exec vitest run harness/benchmarks/stagingIntegrity.test.ts` to check collection staging validation. It needs no Vortex, game or account. The tests use real temporary directories with mocked Vortex state, UI and timing recorder. They check that missing or unsafe staging fails before cleanup, and that both timing routes reject failed validation without counting validation time. They do not install a real collection or measure native phases.

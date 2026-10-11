@@ -34,7 +34,7 @@ Table measurements can include input delay, long-task blocked time, worst task, 
 
 UI metrics get their own repeat summaries, for example `mods.scroll.worstFrameMs` and `mods.scroll.blockedMs`. Null input-delay samples are excluded. If a supplied budget needs a metric that was not captured, the case is blocked rather than passed. Different measurement sequences across repeats fail the case and retain raw results for diagnosis.
 
-A measure() clock covers the complete callback and its visible result, including any readiness work you put inside it. Deployment file integrity is checked afterward. Collection total time stops at the readiness boundary, before listener cleanup and post-run checks. Those checks can still fail the case. Collection-driver waits and polling remain part of end-to-end time and are described in control-overhead evidence; they are not silently removed as user waits.
+A measure() clock covers the complete callback and its visible result, including any readiness work you put inside it. Staging directory validation and deployment file integrity are checked afterward, before accepting the sample. Collection total time stops at the readiness boundary, before listener cleanup and post-run checks. Those checks can still fail the case. Collection-driver waits and polling remain part of end-to-end time and are described in control-overhead evidence; they are not silently removed as user waits.
 
 Simple sort helpers read the names and establish an initial order before timing. Their setup warms virtualized rows; the reported action reverses that order and waits for visible rows to paint. Compare these runs with the same preparation.
 

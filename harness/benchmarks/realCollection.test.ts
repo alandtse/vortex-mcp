@@ -82,17 +82,22 @@ describe("real collection completion and game readiness", () => {
       const mod = {
         type: "collection",
         state: "installed",
+        installationPath: "collection",
         attributes: { collectionSlug: "fixture", revisionNumber: 2 },
         rules,
       };
+      const staging = path.join(root, "staging");
+      fs.mkdirSync(path.join(staging, "collection"), { recursive: true });
       const call = vi.fn(async (tool: string, args: Record<string, unknown>) =>
-        tool === "collection_status"
-          ? [{ collectionModId: "collection", complete: true, required, satisfied: required }]
-          : (args.path as string[] | undefined)?.at(-1) === "collection"
-            ? mod
-            : (args.path as string[] | undefined)?.at(-1) === "needToDeploy"
-              ? { skyrimse: false }
-              : { collection: mod },
+        args.selector === "installPathForGame"
+          ? staging
+          : tool === "collection_status"
+            ? [{ collectionModId: "collection", complete: true, required, satisfied: required }]
+            : (args.path as string[] | undefined)?.at(-1) === "collection"
+              ? mod
+              : (args.path as string[] | undefined)?.at(-1) === "needToDeploy"
+                ? { skyrimse: false }
+                : { collection: mod },
       );
       const manifest = {
         collection: {

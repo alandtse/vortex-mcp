@@ -1019,25 +1019,25 @@ async close(preserve = false): Promise<void>;
 export function assertInside(root: string, target: string): void;
 ```
 
-[Implementation](https://github.com/doodlum/vortex-doodlebot/blob/main/harness/benchmarks/session.ts#L957).
+[Implementation](https://github.com/doodlum/vortex-doodlebot/blob/main/harness/benchmarks/session.ts#L1015).
 
 ```typescript
 export function resolveArchivePath(downloads: string, localPath: string, cacheDir: string): string;
 ```
 
-[Implementation](https://github.com/doodlum/vortex-doodlebot/blob/main/harness/benchmarks/session.ts#L973).
+[Implementation](https://github.com/doodlum/vortex-doodlebot/blob/main/harness/benchmarks/session.ts#L1031).
 
 ```typescript
 export function assertCleanGameFixture(source: string): void;
 ```
 
-[Implementation](https://github.com/doodlum/vortex-doodlebot/blob/main/harness/benchmarks/session.ts#L982).
+[Implementation](https://github.com/doodlum/vortex-doodlebot/blob/main/harness/benchmarks/session.ts#L1040).
 
 ```typescript
 export async function createSession(options: SessionOptions): Promise<BenchmarkSession>;
 ```
 
-[Implementation](https://github.com/doodlum/vortex-doodlebot/blob/main/harness/benchmarks/session.ts#L1051).
+[Implementation](https://github.com/doodlum/vortex-doodlebot/blob/main/harness/benchmarks/session.ts#L1109).
 
 ```typescript
 export async function withVortex<T>(
@@ -1046,7 +1046,7 @@ export async function withVortex<T>(
 ): Promise<T>;
 ```
 
-[Implementation](https://github.com/doodlum/vortex-doodlebot/blob/main/harness/benchmarks/session.ts#L1267).
+[Implementation](https://github.com/doodlum/vortex-doodlebot/blob/main/harness/benchmarks/session.ts#L1325).
 
 ```typescript
 export interface RestartCollectionOptions extends Omit<SessionOptions, "dataset" | "cleanStart"> {
@@ -1055,7 +1055,7 @@ export interface RestartCollectionOptions extends Omit<SessionOptions, "dataset"
 }
 ```
 
-[Implementation](https://github.com/doodlum/vortex-doodlebot/blob/main/harness/benchmarks/session.ts#L1275).
+[Implementation](https://github.com/doodlum/vortex-doodlebot/blob/main/harness/benchmarks/session.ts#L1333).
 
 Stop the previous owned session if supplied, then start a cold benchmark from a verified snapshot.
 
@@ -1066,7 +1066,7 @@ export async function restartCollectionBenchmark<T>(
 ): Promise<T>;
 ```
 
-[Implementation](https://github.com/doodlum/vortex-doodlebot/blob/main/harness/benchmarks/session.ts#L1280).
+[Implementation](https://github.com/doodlum/vortex-doodlebot/blob/main/harness/benchmarks/session.ts#L1338).
 
 ## benchmarks.gameFixtures
 

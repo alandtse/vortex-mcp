@@ -31,6 +31,15 @@ and the source-generated package/helper references when selection or prerequisit
 `docs:test` verifies stale/missing/one-audience failures and executable documentation examples.
 `docs:build` is the separate strict MkDocs gate for site publication, using requirements-docs.txt.
 
+Staging integrity regressions: `pnpm exec vitest run harness/benchmarks/stagingIntegrity.test.ts`
+needs no Vortex, game or account. Private native filesystem fixtures and mocked native state/UI
+exercise the SDK's warm preparation and real-readiness routes. Missing, linked, unsafe and
+non-directory staging paths fail before purge/removal; empty installed inventories also fail.
+Both measurement routes defer this validation until after the action window and reject failed
+samples. These fixtures mock the recorder and establish no real installation or native phase
+timing. Directory presence is not full installer-output integrity; deployment-manifest byte
+verification is separate. Failures retain evidence without recovery or another install attempt.
+
 Workflow regression coverage must exercise actual boundaries: independent commands with the
 same owner are excluded; intentional nested work is allowed; partial holds unwind before retry;
 known children keep protection after wrapper interruption; failed child registration waits for
