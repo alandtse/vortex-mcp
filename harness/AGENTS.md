@@ -86,6 +86,14 @@ pnpm run ai -- login-import --cache-dir D:\other-cache [--from D:\bench-cache] [
 
 ## Run and reset
 
+Cold bootstrap registers the selected path with activation disabled, awaits a clean stop,
+then launches that same private profile with Vortex's `--game <id>` argument. Await the
+active game and verify its discovered path before writing the snapshot marker. This invokes
+Vortex's native profile/staging setup even when the Games UI omits locally discovered games.
+Do not replace it with a synthetic profile dispatch. Conflicting target `--game`/`--profile`
+arguments fail before launch. `--no-game` retains its single cold launch. Setup and shutdown
+failures remain separate causes when both occur.
+
 Real benchmark native lifecycle: `harness/benchmarks/index.ts` exports `createGameSnapshot`,
 `verifyGameSnapshot`, `resetGameSettings`, and `restartCollectionBenchmark`. Restart requires a
 versioned SHA256 snapshot, uses a fresh private profile/game/archive cache, backs up and resets

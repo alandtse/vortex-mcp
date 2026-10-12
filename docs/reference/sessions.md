@@ -26,6 +26,8 @@ await withVortex({}, async (vortex) => {
 
 Callback and cleanup errors fail the call. Failed workspaces are retained, with their path in the error. Successful sessions remove their temporary workspace; save screenshots and other files outside it. See [the first test](../getting-started/first-session.md).
 
+The first start registers the private game path and closes Vortex to save it. A second start lets Vortex create its default profile and staging folder through its own game-startup handler. The session waits for that game to become active and checks that its path still matches the private copy before saving the reusable profile. This setup happens before benchmark timing. A failed setup or shutdown leaves no usable snapshot; if both fail, the error retains both causes.
+
 ## SessionOptions
 
 <!-- contract:benchmarks.session:SessionOptions -->

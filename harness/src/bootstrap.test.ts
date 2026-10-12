@@ -2,12 +2,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { bootstrap, captureLogin, liveDir, loginDir, readMarker, snapshotDir } from "./bootstrap";
 import type { HarnessConfig } from "./config";
 import { requireOAuth } from "./auth";
-import { authCacheFile, stopStaleInstance } from "./instance";
+import { authCacheFile, launchVortex, stopStaleInstance } from "./instance";
+import { ensureGameManaged, waitForGameStartup } from "./gameSetup";
 
 vi.mock("./liveOperation", () => ({
   withLiveOperation: (
@@ -25,6 +26,7 @@ vi.mock("./gameSetup", () => ({
       alreadyKnown: false,
     }),
   ),
+  waitForGameStartup: vi.fn(async () => true),
 }));
 
 vi.mock("./auth", () => ({
@@ -39,8 +41,12 @@ vi.mock("./instance", async (importOriginal) => ({
   stopStaleInstance: vi.fn(async () => false),
   ensureExtensionBuilt: vi.fn(async () => "unit fixture"),
   installMcpExtension: vi.fn(),
-  launchVortex: vi.fn(async () => ({
-    mcp: { call: vi.fn(async () => ({ oauthPresent: true })) },
+  launchVortex: vi.fn(async ({ config }: { config: HarnessConfig }) => ({
+    mcp: {
+      call: vi.fn(async (_tool: string, args: { path?: string[] }) =>
+        args?.path?.includes("discovered") ? { path: config.gamePath } : { oauthPresent: true },
+      ),
+    },
     stop: vi.fn(async () => undefined),
   })),
 }));
@@ -55,7 +61,7 @@ function fakeConfig(): HarnessConfig {
     gameId: "fallout4",
     gamePath: "C:/Games/Fallout 4",
     apiKey: "test-key",
-    target: { kind: "installed", appName: "Vortex", executable: "C:/Vortex/Vortex.exe" },
+    target: { kind: "installed", appName: "Vortex", executable: "C:/Vortex/Vortex.exe", args: [] },
   } as unknown as HarnessConfig;
   fs.mkdirSync(liveDir(config), { recursive: true });
   fs.writeFileSync(
@@ -68,6 +74,127 @@ function fakeConfig(): HarnessConfig {
 afterEach(() => {
   vi.clearAllMocks();
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+});
+
+describe("cold game management", () => {
+  beforeEach(() => {
+    vi.mocked(waitForGameStartup).mockResolvedValue(true);
+  });
+
+  it("flushes the registered private path before canonical startup, waits, and leaves target args unchanged", async () => {
+    const config = fakeConfig();
+    const result = await bootstrap(config, { fresh: true });
+    const launches = vi.mocked(launchVortex).mock.calls;
+    expect(launches).toHaveLength(3);
+    expect(vi.mocked(ensureGameManaged).mock.calls[0]![2].activate).toBe(false);
+    const first = await vi.mocked(launchVortex).mock.results[0]!.value;
+    expect(vi.mocked(first.stop).mock.invocationCallOrder[0]!).toBeLessThan(
+      vi.mocked(launchVortex).mock.invocationCallOrder[1]!,
+    );
+    expect(launches[1]![0].config.target.args).toEqual(["--game", "fallout4"]);
+    expect(vi.mocked(waitForGameStartup).mock.invocationCallOrder[0]!).toBeLessThan(
+      vi.mocked(ensureGameManaged).mock.invocationCallOrder[1]!,
+    );
+    expect(config.target.args).toEqual([]);
+    expect(readMarker(snapshotDir(config, "test-key"))?.gameId).toBe("fallout4");
+    await result.instance.stop();
+  });
+
+  it.each(["--game=other", "--profile", "--game"])(
+    "rejects conflicting %s before launching",
+    async (arg) => {
+      const config = fakeConfig();
+      config.target.args = [arg];
+      await expect(bootstrap(config, { fresh: true })).rejects.toThrow(/cannot override/);
+      expect(launchVortex).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not publish a snapshot or start a live session when activation fails", async () => {
+    const config = fakeConfig();
+    vi.mocked(waitForGameStartup).mockRejectedValueOnce(new Error("activation failed"));
+    await expect(bootstrap(config, { fresh: true })).rejects.toThrow("activation failed");
+    expect(launchVortex).toHaveBeenCalledTimes(2);
+    expect(readMarker(snapshotDir(config, "test-key"))).toBeUndefined();
+    const second = await vi.mocked(launchVortex).mock.results[1]!.value;
+    expect(second.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not enter the normal management path or publish a snapshot before native activation finishes", async () => {
+    const config = fakeConfig();
+    let activate!: (value: boolean) => void;
+    const pendingActivation = new Promise<boolean>((resolve) => {
+      activate = resolve;
+    });
+    vi.mocked(waitForGameStartup).mockImplementationOnce(() => pendingActivation);
+    const starting = bootstrap(config, { fresh: true });
+    await vi.waitFor(() => expect(waitForGameStartup).toHaveBeenCalledTimes(1));
+    expect(ensureGameManaged).toHaveBeenCalledTimes(1);
+    expect(readMarker(snapshotDir(config, "test-key"))).toBeUndefined();
+    activate(true);
+    const result = await starting;
+    expect(ensureGameManaged).toHaveBeenCalledTimes(2);
+    expect(readMarker(snapshotDir(config, "test-key"))).toBeDefined();
+    await result.instance.stop();
+  });
+
+  it("does not start the management phase after a failed registration-phase shutdown", async () => {
+    const config = fakeConfig();
+    const normalLaunch = vi.mocked(launchVortex).getMockImplementation()!;
+    vi.mocked(launchVortex).mockImplementationOnce(async (options) => {
+      const instance = await normalLaunch(options);
+      vi.mocked(instance.stop).mockRejectedValueOnce(new Error("still running"));
+      return instance;
+    });
+    await expect(bootstrap(config, { fresh: true })).rejects.toThrow("still running");
+    expect(launchVortex).toHaveBeenCalledTimes(1);
+    expect(waitForGameStartup).not.toHaveBeenCalled();
+    expect(readMarker(snapshotDir(config, "test-key"))).toBeUndefined();
+  });
+
+  it("retains registration and shutdown errors and never launches the management phase", async () => {
+    const config = fakeConfig();
+    const original = new Error("registration failed");
+    const cleanup = new Error("shutdown failed");
+    vi.mocked(ensureGameManaged).mockRejectedValueOnce(original);
+    vi.mocked(launchVortex).mockResolvedValueOnce({
+      mcp: { call: vi.fn(async () => ({ oauthPresent: true })) },
+      stop: vi.fn(async () => {
+        throw cleanup;
+      }),
+    } as never);
+    const failure = await bootstrap(config, { fresh: true }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([original, cleanup]);
+    expect((failure as Error).cause).toBe(original);
+    expect(launchVortex).toHaveBeenCalledTimes(1);
+    expect(readMarker(snapshotDir(config, "test-key"))).toBeUndefined();
+  });
+
+  it("rejects a game activated at a different path without correcting it or caching it", async () => {
+    const config = fakeConfig();
+    const normalLaunch = vi.mocked(launchVortex).getMockImplementation()!;
+    vi.mocked(launchVortex)
+      .mockImplementationOnce(normalLaunch)
+      .mockImplementationOnce(async (options) => {
+        const instance = await normalLaunch(options);
+        vi.mocked(instance.mcp.call).mockResolvedValue({ path: "C:/Wrong/Real Game" });
+        return instance;
+      });
+    await expect(bootstrap(config, { fresh: true })).rejects.toThrow(/different game path/);
+    expect(ensureGameManaged).toHaveBeenCalledTimes(1);
+    expect(readMarker(snapshotDir(config, "test-key"))).toBeUndefined();
+  });
+
+  it("keeps no-game bootstrap to one cold launch and one live launch", async () => {
+    const config = fakeConfig();
+    const result = await bootstrap(config, { fresh: true, skipGame: true });
+    expect(launchVortex).toHaveBeenCalledTimes(2);
+    expect(waitForGameStartup).not.toHaveBeenCalled();
+    expect(ensureGameManaged).not.toHaveBeenCalled();
+    expect(readMarker(snapshotDir(config, "test-key", true))?.gameSkipped).toBe(true);
+    await result.instance.stop();
+  });
 });
 
 describe("real copied game preservation", () => {

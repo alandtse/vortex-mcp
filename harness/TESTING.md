@@ -6,6 +6,20 @@ feature regression is useful evidence for that feature, but is not a universal k
 
 ## Fast gate
 
+Cold setup regressions: `pnpm exec vitest run harness/src/bootstrap.test.ts` requires installed
+kit dependencies but no Vortex, game or account. Mocked launches and temporary directories
+verify register/flush/native-startup ordering, delayed activation, private path validation,
+conflicting CLI arguments, no-game behavior and failure preservation. A failed first shutdown
+cannot admit the second launch; activation failures cannot publish the snapshot marker.
+These checks do not prove native staging creation. Run the released-app core and the relevant
+source runtime separately, including actual staging tag/instance identity, archive install,
+enable/deploy/purge, warm/reset reuse and graceful shutdown.
+
+`pnpm exec vitest run harness/src/gameStartup.test.ts` exercises the actual activation/dialog
+helpers with fake clocks and MCP transport. Watcher failures are captured immediately, abort
+further active-game polling, and await in-flight work before rejecting. Separate UI activation
+and watcher errors remain distinct causes. These tests need no Vortex, game or account.
+
 `pnpm run ci` runs types, lint, formatting, paired documentation checks and their negative
 controls, unit and filesystem/process tests, and the extension build. Run it for every kit change. Tests use synthetic credentials and an
 isolated lease directory. The operator's package-manager override must not affect them.

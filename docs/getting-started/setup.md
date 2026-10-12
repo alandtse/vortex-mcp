@@ -19,6 +19,8 @@ Choose **Prepare a real collection**. Select the collection, confirm the test-ma
 
 A **snapshot** is a verified clean game copy that you can reuse. Each benchmark creates a separate **working copy** to modify. Setup leaves the Steam game and existing snapshots untouched and starts no collection downloads.
 
+On the first Vortex start, expect an extra restart while it saves the private game path and initializes the managed profile and staging folder. Setup waits for activation and checks the copied game's path before continuing. Keep any setup failure report; the runner does not treat a registered path alone as a ready game.
+
 | Choice | Content and install policy                                                                                                                                                                  |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | C1     | [Immersive & Adult, revision 104](https://www.nexusmods.com/games/skyrimspecialedition/collections/xxsqm4/revisions/104); follow the curator's game requirements                            |

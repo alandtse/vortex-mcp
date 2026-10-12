@@ -24,7 +24,7 @@ import path from "node:path";
 import type { ChildProcess } from "node:child_process";
 
 import { ConfigError, MCP_EXTENSION_ID, type HarnessConfig } from "./config";
-import { ensureGameManaged, type EnsureGameResult } from "./gameSetup";
+import { ensureGameManaged, waitForGameStartup, type EnsureGameResult } from "./gameSetup";
 import { readJsonFile } from "./jsonFile";
 import {
   ensureExtensionBuilt,
@@ -453,6 +453,15 @@ async function buildSnapshot(
 ): Promise<void> {
   const report = options.onProgress ?? ((): void => undefined);
 
+  if (
+    options.skipGame !== true &&
+    config.target.args.some((arg) => /^--(?:game|profile)(?:=|$)/.test(arg))
+  ) {
+    throw new ConfigError(
+      "Cold game setup cannot override a target's --game or --profile argument.",
+    );
+  }
+
   // Built in place rather than in a staging directory that gets renamed at the
   // end. A directory rename on Windows fails with EPERM for reasons that have
   // nothing to do with Vortex still running — an indexer or scanner holding a
@@ -467,15 +476,8 @@ async function buildSnapshot(
   installMcpExtension(snapshot, undefined, { ...options, owner: config.owner });
 
   report("cold: starting a blank Vortex");
-  const instance = await launchVortex({
-    ...options,
-    userDataDir: snapshot,
-    config,
-    onProgress: report,
-  });
-
-  let game: EnsureGameResult;
-  try {
+  const launchOptions = { ...options, userDataDir: snapshot, config, onProgress: report };
+  let game = await withSnapshotInstance(launchOptions, async (instance) => {
     const auth = await instance.mcp.call<{ oauthPresent: boolean }>("nexus_auth_status");
     if (auth.oauthPresent) {
       report("cold: cached OAuth credentials present; Vortex manages refresh");
@@ -487,17 +489,41 @@ async function buildSnapshot(
     }
 
     report("cold: registering the game");
-    game =
+    const registered =
       options.skipGame === true
         ? { gameId: config.gameId, gamePath: "(skipped)", activated: false, alreadyKnown: false }
         : await ensureGameManaged(instance.mcp, config.gameId, {
             gamePath: config.gamePath,
+            activate: false,
             config,
           });
 
     report("cold: quitting cleanly to flush state");
-  } finally {
-    await instance.stop(options);
+    return registered;
+  });
+
+  if (options.skipGame !== true) {
+    report("cold: managing the registered game through Vortex's --game startup");
+    const manageConfig = {
+      ...config,
+      target: { ...config.target, args: [...config.target.args, "--game", config.gameId] },
+    };
+    game = await withSnapshotInstance(
+      { ...launchOptions, config: manageConfig },
+      async (instance) => {
+        await waitForGameStartup(instance.mcp, config.gameId);
+        const discovered = await instance.mcp.call<{ path?: string } | null>("vortex_query", {
+          path: ["settings", "gameMode", "discovered", config.gameId],
+        });
+        if (
+          !discovered?.path ||
+          path.resolve(discovered.path).toLowerCase() !== path.resolve(game.gamePath).toLowerCase()
+        ) {
+          throw new ConfigError("Vortex managed a different game path during cold setup.");
+        }
+        return { ...game, activated: true };
+      },
+    );
   }
 
   // The extension is reinstalled on every launch anyway, and leaving it out
@@ -520,6 +546,43 @@ async function buildSnapshot(
   };
   fs.writeFileSync(path.join(snapshot, MARKER_FILE), JSON.stringify(marker, null, 2));
   report(`cold: snapshot cached at ${snapshot}`);
+}
+
+/** A failed cold phase must retain its first failure even if shutdown also fails. */
+async function withSnapshotInstance<T>(
+  options: Parameters<typeof launchVortex>[0],
+  work: (instance: VortexInstance) => Promise<T>,
+): Promise<T> {
+  const instance = await launchVortex(options);
+  let failed = false;
+  let failure: unknown;
+  let result: T | undefined;
+  try {
+    result = await work(instance);
+  } catch (error) {
+    failed = true;
+    failure = error;
+  }
+  let stopFailed = false;
+  let stopFailure: unknown;
+  try {
+    await instance.stop(options);
+  } catch (error) {
+    stopFailed = true;
+    stopFailure = error;
+  }
+  if (failed && stopFailed) {
+    throw new AggregateError(
+      [failure, stopFailure],
+      "Cold setup and Vortex shutdown both failed.",
+      {
+        cause: failure,
+      },
+    );
+  }
+  if (failed) throw failure;
+  if (stopFailed) throw stopFailure;
+  return result as T;
 }
 
 /**

@@ -311,27 +311,64 @@ async function activateGame(
   });
   const hasProfile = Object.values(profiles ?? {}).some((p) => p.gameId === gameId);
 
-  // Answer blocking modals for the whole activation, not at one fixed point:
-  // the purge prompt in particular appears partway through, and without an
-  // answer activation simply never completes.
-  const controller = new AbortController();
-  const answering = autoAnswerDialogs(mcp, {
-    signal: controller.signal,
-    onAnswer: (a: AnsweredDialog) =>
-      console.log(`  answered "${a.dialog.slice(0, 60)}..." with "${a.clicked}" — ${a.because}`),
-  });
-
-  try {
+  return withGameActivationDialogs(mcp, async (signal) => {
     if (hasProfile) {
       await mcp.call("vortex_dispatch", { action: "activate-game", args: [gameId] });
     } else {
       await withUiLock(mcp, () => manageGameViaUi(mcp, config, gameName));
     }
-    return await waitForActiveGame(mcp, gameId);
-  } finally {
-    controller.abort();
-    await answering.catch(() => undefined);
+    return await waitForActiveGame(mcp, gameId, 180_000, signal);
+  });
+}
+
+/** Wait for Vortex's native --game startup while answering the usual activation dialogs. */
+export function waitForGameStartup(mcp: VortexMcpClient, gameId: string): Promise<boolean> {
+  return withGameActivationDialogs(mcp, (signal) =>
+    waitForActiveGame(mcp, gameId, 180_000, signal),
+  );
+}
+
+async function withGameActivationDialogs<T>(
+  mcp: VortexMcpClient,
+  work: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  // Answer blocking modals for the whole activation, not at one fixed point:
+  // the purge prompt in particular appears partway through, and without an
+  // answer activation simply never completes.
+  const controller = new AbortController();
+  let answeringFailed = false;
+  let answeringFailure: unknown;
+  const answering = autoAnswerDialogs(mcp, {
+    signal: controller.signal,
+    onAnswer: (a: AnsweredDialog) =>
+      console.log(`  answered "${a.dialog.slice(0, 60)}..." with "${a.clicked}" — ${a.because}`),
+  }).catch((error: unknown) => {
+    answeringFailed = true;
+    answeringFailure = error;
+    controller.abort(error);
+  });
+
+  let failed = false;
+  let failure: unknown;
+  let result: T | undefined;
+  try {
+    result = await work(controller.signal);
+  } catch (error) {
+    failed = true;
+    failure = error;
   }
+  controller.abort();
+  await answering;
+  if (failed && answeringFailed && failure !== answeringFailure) {
+    throw new AggregateError(
+      [failure, answeringFailure],
+      "Game activation and dialog handling both failed.",
+      { cause: failure },
+    );
+  }
+  if (failed) throw failure;
+  if (answeringFailed) throw answeringFailure;
+  return result as T;
 }
 
 /**
@@ -457,12 +494,15 @@ async function waitForActiveGame(
   mcp: VortexMcpClient,
   gameId: string,
   timeoutMs = 180_000,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   const started = Date.now();
   for (;;) {
+    signal?.throwIfAborted();
     const active = await mcp
       .call<string | null>("vortex_query", { selector: "activeGameId" })
       .catch(() => null);
+    signal?.throwIfAborted();
     if (active === gameId) return true;
     if (Date.now() - started > timeoutMs) {
       // Activation stalls almost exclusively on something Vortex is waiting for
