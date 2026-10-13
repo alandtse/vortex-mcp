@@ -4,7 +4,7 @@ index b78ff59d0..62c731db7 100644
 +++ b/packages/e2e/src/fixtures/vortex-app.ts
 @@ -70,16 +70,30 @@ async function waitForMainWindow(vortexApp: ElectronApplication): Promise<Page>
    }
- 
+
    return new Promise<Page>((resolve, reject) => {
 +    const watchedPages = new Set<Page>();
      const cleanup = () => {
@@ -13,7 +13,7 @@ index b78ff59d0..62c731db7 100644
        vortexApp.process().off("exit", onExit);
 +      for (const page of watchedPages) page.off("framenavigated", onNavigation);
      };
- 
+
      const onWindow = (page: Page) => {
        if (isMainWindow(page)) {
          cleanup();
@@ -32,15 +32,15 @@ index b78ff59d0..62c731db7 100644
 +        resolve(page);
        }
      };
- 
+
 @@ -102,6 +116,7 @@ async function waitForMainWindow(vortexApp: ElectronApplication): Promise<Page>
- 
+
      vortexApp.on("window", onWindow);
      vortexApp.process().on("exit", onExit);
 +    for (const page of vortexApp.windows()) onWindow(page);
    });
  }
- 
+
 @@ -120,13 +135,18 @@ async function setupMainWindow(app: ElectronApplication, timeoutMs: number): Pro
    // Race against process exit so a crash produces a clear error rather than
    // the generic "Target page, context or browser has been closed".
