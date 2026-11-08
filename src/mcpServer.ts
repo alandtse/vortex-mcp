@@ -999,10 +999,15 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
     {
       description:
         "Enable or disable a set of mods for a profile (defaults to the active profile). Does " +
-        "not deploy. Pass expectedActiveProfileId to guard against acting on a stale " +
-        "assumption about what's currently active, especially relevant when profileId is " +
-        "omitted (defaults to whatever's active right now, which may not be what you last " +
-        "observed) — see its own param description.",
+        "not deploy. Every modId is checked against the profile's game first: one unknown " +
+        "id (list_mods' `id` field, not the display name) fails the whole call with nothing " +
+        "changed. Returns what really happened, re-read from the profile afterwards: " +
+        "`changed`, `unchanged` (already in the requested state), and `failed` (should have " +
+        "changed but didn't — Vortex reports those only as a notification, see " +
+        "list_notifications). Pass expectedActiveProfileId to guard against acting on a " +
+        "stale assumption about what's currently active, especially relevant when " +
+        "profileId is omitted (defaults to whatever's active right now, which may not be " +
+        "what you last observed) — see its own param description.",
       inputSchema: z.object({
         modIds: z.array(z.string()).min(1),
         enabled: z.boolean(),
@@ -1011,14 +1016,10 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
       }),
     },
     async ({ modIds, enabled, profileId, expectedActiveProfileId }) => {
-      await control.setModsEnabled(api, modIds, enabled, profileId, {
+      const result = await control.setModsEnabled(api, modIds, enabled, profileId, {
         activeProfileId: expectedActiveProfileId,
       });
-      return {
-        content: [
-          { type: "text", text: `${enabled ? "Enabled" : "Disabled"} ${modIds.length} mod(s)` },
-        ],
-      };
+      return { content: [jsonText(result)] };
     },
   );
 
