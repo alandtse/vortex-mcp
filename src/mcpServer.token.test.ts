@@ -41,6 +41,8 @@ vi.mock("./vortexControl", () => ({
   listFileConflicts: vi.fn(async () => []),
   setModsEnabled: vi.fn(async () => undefined),
   launchGame: vi.fn(async () => undefined),
+  deployMods: vi.fn(async () => ({ profileId: "p1", deployMs: 1, lootSort: "done" })),
+  purgeMods: vi.fn(async () => ({ profileId: "p1", purgeMs: 1 })),
   restartVortex: vi.fn(),
   dispatchAction: vi.fn(async () => ({ type: "NOOP" })),
   pollListener: vi.fn(() => ({ entries: [], lastSeq: 0 })),
@@ -148,21 +150,20 @@ describe("mcpServer bearer token gating", () => {
         "vortex_dispatch",
         "poll_listener",
         "backup_state",
+        "deploy_mods",
+        "purge_mods",
         "launch_game",
         "vortex_restart",
       ]),
     );
-    // deploy_mods/purge_mods/install_mod_from_url/activate_game were removed as dedicated
-    // tools once vortex_dispatch's event/apiMethods fallback tiers made them fully
-    // expressible generically (e.g. action="deploy-mods", args=["__CALLBACK__"]).
-    expect(names).not.toEqual(
-      expect.arrayContaining([
-        "deploy_mods",
-        "purge_mods",
-        "install_mod_from_url",
-        "activate_game",
-      ]),
-    );
+    // install_mod_from_url/activate_game were removed as dedicated tools once
+    // vortex_dispatch's event/apiMethods fallback tiers made them fully expressible
+    // generically. deploy_mods/purge_mods came back as dedicated tools because they do
+    // more than one emit can: a running-tool guard (Vortex skips the operation silently
+    // otherwise), a timeout for one stuck on a dialog, and (deploy) the LOOT auto-sort.
+    for (const removed of ["install_mod_from_url", "activate_game"]) {
+      expect(names).not.toContain(removed);
+    }
   });
 
   it("vortex_dispatch passes any action/api.ext name through to dispatchAction, not just a curated subset", async () => {

@@ -156,9 +156,10 @@ same-origin.
 
 **Writes fail closed on `VORTEX_MCP_TOKEN`.** With no token set, only the
 read tools — every tool marked `read` in the [Tools](#tools) table above —
-are ever registered; none of the eight write tools (`switch_profile`,
+are ever registered; none of the ten write tools (`switch_profile`,
 `clone_profile`, `vortex_dispatch`, `poll_listener`, `backup_state`,
-`set_mods_enabled`, `launch_game`, `vortex_restart`) exist to call. Set
+`set_mods_enabled`, `deploy_mods`, `purge_mods`, `launch_game`,
+`vortex_restart`) exist to call. Set
 `VORTEX_MCP_TOKEN` to require `Authorization: Bearer <token>` on every
 request (reads included) _and_ unlock the write tools. There is no
 per-tool authorization once a token is set — any client holding it has
@@ -188,8 +189,8 @@ credentials (`setUserAPIKey`, `nexusRequestNexusLogin`, …) — the boundary
 is specifically on reading one back out.
 
 **Writes can optionally guard against a stale assumption about what's
-currently active.** `switch_profile`, `set_mods_enabled`, `launch_game`,
-and `vortex_dispatch` all accept optional
+currently active.** `switch_profile`, `set_mods_enabled`, `deploy_mods`,
+`purge_mods`, `launch_game`, and `vortex_dispatch` all accept optional
 `expectedActiveProfileId`/`expectedActiveGameId` params; when set, the
 write throws immediately — before touching anything — if the live active
 profile/game no longer matches what the caller last observed, instead of

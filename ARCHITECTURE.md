@@ -60,7 +60,12 @@ or bit of orchestration that name-based reflection can't do in one call:
 `setModsEnabled` takes `api` directly and must be awaited rather than
 dispatched; `clone_profile` is a filesystem copy plus a dispatch;
 `launch_game` resolves the active profile's configured tool through two
-levels of settings state before running it.
+levels of settings state before running it; `deploy_mods` and `purge_mods`
+emit Vortex's `deploy-mods`/`purge-mods` events but first refuse the cases
+where Vortex would skip the operation without an error (game or tool running,
+another mod operation in progress), add a timeout, and (for deploy) wait for
+the LOOT auto-sort that follows — a bare `vortex_dispatch("deploy-mods",
+["__CALLBACK__"])` can express none of that.
 
 A handful of `apiMethods` (`onStateChange`, `onAsync`, `registerProtocol`,
 `registerRepositoryLookup` — see `vortex_describe`'s `listenerHints`) don't
@@ -85,7 +90,7 @@ A capability falls into one of three cases:
 
 1. **A real join or orchestration reflection can't do in one call**
    (`list_mods`, `clone_profile`, `launch_game`,
-   `check_nexus_mod_updates`). The underlying operation is fully reachable
+   `check_nexus_mod_updates`, `deploy_mods`, `purge_mods`). The underlying operation is fully reachable
    through `@nexusmods/vortex-api`; the tool just does more than one
    generic call's worth of work. Stays a vortex-mcp-side tool.
 2. **A real Redux action exists, just not published through
