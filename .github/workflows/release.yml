@@ -5,7 +5,8 @@
 # at that exact tag, zips dist/ + info.json into the Vortex plugin layout, attaches it, and
 # promotes the release. Nexus upload is a separate, explicitly-gated job.
 #
-# Runs on every push to main (and on manual dispatch): if there are unreleased Conventional
+# Runs on every push to main (and on manual dispatch), after a 5-minute debounce so a batch
+# of merges produces one release: if there are unreleased Conventional
 # commits, semantic-release cuts the next version; otherwise it no-ops and the downstream
 # jobs skip. The bump commit carries [skip ci] so it doesn't re-trigger.
 #
@@ -20,17 +21,37 @@ on:
     branches: [main]
   workflow_dispatch:
 
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
-
 permissions:
   contents: read
 
 jobs:
+  # Debounce: when several PRs land close together, release once for the whole batch.
+  # Each push-triggered run first sleeps here. A newer push cancels the sleeping run
+  # (cancel-in-progress on this job only), so only the last push of a burst gets past
+  # this job and reaches semantic-release, which then releases every unreleased commit.
+  # Manual dispatches skip the wait. The release itself runs in a separate, non-cancelling
+  # concurrency group so an in-flight release is never interrupted.
+  debounce:
+    name: Debounce
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-debounce-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Wait for further pushes
+        run: sleep 300
+
   semantic-release:
     name: Semantic Release
+    needs: debounce
+    # A skipped debounce (manual dispatch) must not skip the release; a cancelled or
+    # failed one must.
+    if: ${{ !cancelled() && (needs.debounce.result == 'success' || needs.debounce.result == 'skipped') }}
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: write # push the bump commit + tag, create the GitHub Release
     outputs:
