@@ -10,10 +10,10 @@ importers:
     dependencies:
       '@modelcontextprotocol/node':
         specifier: 2.0.0
-        version: 2.0.0(@modelcontextprotocol/server@2.0.0)(hono@4.13.5)
+        version: 2.0.0(@modelcontextprotocol/server@2.3.0)(hono@4.13.5)
       '@modelcontextprotocol/server':
-        specifier: 2.0.0
-        version: 2.0.0
+        specifier: 2.3.0
+        version: 2.3.0
       zod:
         specifier: ^4.6.6
         version: 4.6.6
@@ -49,8 +49,8 @@ packages:
     resolution: {integrity: sha512-5GidEBf/rOQlv4sUknPRgboZEvzt/je7CpbkCZ2o7ojs9JbldxdXJinGLYE0sYR9mfPpRz3Q3D7rP+oSCal70g==}
     engines: {node: '>=6.9.0'}
 
-  '@babel/runtime@7.29.10':
-    resolution: {integrity: sha512-NpugTzbKgGrNe45Ui32cN8vCFFMxVtP/9rtfwv0nP5FRDAjvYBxJcLVpYA9mr1jxP6cnIT7x9LUzuDTbWYYNRA==}
+  '@babel/runtime@7.29.13':
+    resolution: {integrity: sha512-v+oN26xP4YIlQsbQ/CbTH1WG5m/l/DjKKZNy/Kp3f/AFvbgt7Em/D0FeMM3O2hX0YzeN2M16W8lOpyhIkfCBcQ==}
     engines: {node: '>=6.9.0'}
 
   '@babel/runtime@7.29.7':
@@ -388,8 +388,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@modelcontextprotocol/core@2.0.0':
-    resolution: {integrity: sha512-pJCEwGG7Lfr/+PQp9ZTwKXNeO5wzbfKL7H3MYpCorM4oFBoQrdjnBgEoqG+RjhsvS1FKrDbKux+M1HhlnGWqcA==}
+  '@modelcontextprotocol/core@2.3.0':
+    resolution: {integrity: sha512-09BHFaNVBe5pB2AhzCfLj0cqmsKLERvZQ4FblzP90UMGLaXVqdZPByFjURwsUYCmxonUW2yAwgTTvle+8O2/8w==}
     engines: {node: '>=20'}
 
   '@modelcontextprotocol/node@2.0.0':
@@ -402,8 +402,8 @@ packages:
       hono:
         optional: true
 
-  '@modelcontextprotocol/server@2.0.0':
-    resolution: {integrity: sha512-YhHWdHfpFMQfd0prsEnxKeS3Qz3ytIGmsS0sth4KDjnacIT7hxk6hXHkJ9KysxlkvTM+WZAtQbbcUhdoP4Hvtw==}
+  '@modelcontextprotocol/server@2.3.0':
+    resolution: {integrity: sha512-+6b0LdsQLmHsvS7J6sQJ4weTpzUn61fU1JKS+321/+IyDYoHW5CR2Tgqcs6GgAAQvlesCo6yX3xttgmx+XGtJw==}
     engines: {node: '>=20'}
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
@@ -1501,7 +1501,7 @@ snapshots:
     dependencies:
       core-js: 2.6.12
 
-  '@babel/runtime@7.29.10': {}
+  '@babel/runtime@7.29.13': {}
 
   '@babel/runtime@7.29.7': {}
 
@@ -1679,20 +1679,20 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
-  '@modelcontextprotocol/core@2.0.0':
+  '@modelcontextprotocol/core@2.3.0':
     dependencies:
       zod: 4.6.6
 
-  '@modelcontextprotocol/node@2.0.0(@modelcontextprotocol/server@2.0.0)(hono@4.13.5)':
+  '@modelcontextprotocol/node@2.0.0(@modelcontextprotocol/server@2.3.0)(hono@4.13.5)':
     dependencies:
       '@hono/node-server': 1.19.17(hono@4.13.5)
-      '@modelcontextprotocol/server': 2.0.0
+      '@modelcontextprotocol/server': 2.3.0
     optionalDependencies:
       hono: 4.13.5
 
-  '@modelcontextprotocol/server@2.0.0':
+  '@modelcontextprotocol/server@2.3.0':
     dependencies:
-      '@modelcontextprotocol/core': 2.0.0
+      '@modelcontextprotocol/core': 2.3.0
       zod: 4.6.6
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
@@ -2064,7 +2064,7 @@ snapshots:
 
   dom-helpers@3.4.0:
     dependencies:
-      '@babel/runtime': 7.29.10
+      '@babel/runtime': 7.29.13
 
   es-module-lexer@1.7.0: {}
 
@@ -2342,7 +2342,7 @@ snapshots:
 
   react-i18next@11.18.6(i18next@26.4.0(typescript@5.9.3))(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
     dependencies:
-      '@babel/runtime': 7.29.10
+      '@babel/runtime': 7.29.13
       html-parse-stringify: 3.1.0
       i18next: 26.4.0(typescript@5.9.3)
       react: 18.3.1
@@ -2378,7 +2378,7 @@ snapshots:
 
   react-redux@7.2.9(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
     dependencies:
-      '@babel/runtime': 7.29.10
+      '@babel/runtime': 7.29.13
       '@types/react-redux': 7.1.35
       hoist-non-react-statics: 3.3.2
       loose-envify: 1.4.0
@@ -2561,7 +2561,7 @@ snapshots:
 
   uncontrollable@7.2.1(react@18.3.1):
     dependencies:
-      '@babel/runtime': 7.29.10
+      '@babel/runtime': 7.29.13
       '@types/react': 19.3.0
       invariant: 2.2.4
       react: 18.3.1
