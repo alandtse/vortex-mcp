@@ -1451,13 +1451,26 @@ const execFileAsync = promisify(execFile);
  */
 async function findRunningGameProcess(api: IExtensionApi): Promise<string | undefined> {
   const st = state(api);
-  const discovery = selectors.currentGameDiscovery(st) as { executable?: string } | undefined;
-  const game = selectors.currentGame(st) as { executable?: string } | undefined;
-  const exe = discovery?.executable ?? game?.executable;
-  if (exe === undefined) {
+  // IGame.executable is a function (discoveredPath?) => string, while the discovery
+  // result carries a plain string; accept both so a missing discovery executable can't
+  // make path.basename throw on a function.
+  type Executable = string | ((discoveredPath?: string) => string) | undefined;
+  const discovery = selectors.currentGameDiscovery(st) as
+    | { executable?: string; path?: string }
+    | undefined;
+  const game = selectors.currentGame(st) as { executable?: Executable } | undefined;
+  let name: string;
+  try {
+    const gameExe = game?.executable;
+    const exe =
+      discovery?.executable ?? (typeof gameExe === "function" ? gameExe(discovery?.path) : gameExe);
+    if (typeof exe !== "string" || exe === "") {
+      return undefined;
+    }
+    name = path.basename(exe);
+  } catch {
     return undefined;
   }
-  const name = path.basename(exe);
   try {
     const { stdout } = await execFileAsync(
       "tasklist",
@@ -1541,14 +1554,20 @@ async function emitModOperation(
         ),
       );
     }, timeoutMs);
-    api.events.emit(event, ...args, (err: unknown) => {
+    try {
+      api.events.emit(event, ...args, (err: unknown) => {
+        clearTimeout(timer);
+        if (err) {
+          reject(err instanceof Error ? err : new Error(String(err)));
+        } else {
+          resolve();
+        }
+      });
+    } catch (err) {
+      // A synchronous throw from a listener must not leave the timeout timer running.
       clearTimeout(timer);
-      if (err) {
-        reject(err instanceof Error ? err : new Error(String(err)));
-      } else {
-        resolve();
-      }
-    });
+      reject(err instanceof Error ? err : new Error(String(err)));
+    }
   });
   return Date.now() - started;
 }

@@ -1045,14 +1045,15 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
           .optional()
           .describe("How long to wait for the deploy itself; default 120"),
         expectedActiveProfileId: expectedContextSchema.expectedActiveProfileId,
+        expectedActiveGameId: expectedContextSchema.expectedActiveGameId,
       }),
     },
-    async ({ timeoutSeconds, expectedActiveProfileId }) => ({
+    async ({ timeoutSeconds, expectedActiveProfileId, expectedActiveGameId }) => ({
       content: [
         jsonText(
           await control.deployMods(
             api,
-            { activeProfileId: expectedActiveProfileId },
+            { activeProfileId: expectedActiveProfileId, activeGameId: expectedActiveGameId },
             timeoutSeconds === undefined ? undefined : timeoutSeconds * 1000,
           ),
         ),
@@ -1086,14 +1087,15 @@ function registerWriteTools(server: McpServer, api: IExtensionApi): void {
           .optional()
           .describe("How long to wait for the purge; default 120"),
         expectedActiveProfileId: expectedContextSchema.expectedActiveProfileId,
+        expectedActiveGameId: expectedContextSchema.expectedActiveGameId,
       }),
     },
-    async ({ allowFallback, timeoutSeconds, expectedActiveProfileId }) => ({
+    async ({ allowFallback, timeoutSeconds, expectedActiveProfileId, expectedActiveGameId }) => ({
       content: [
         jsonText(
           await control.purgeMods(
             api,
-            { activeProfileId: expectedActiveProfileId },
+            { activeProfileId: expectedActiveProfileId, activeGameId: expectedActiveGameId },
             timeoutSeconds === undefined ? undefined : timeoutSeconds * 1000,
             allowFallback,
           ),

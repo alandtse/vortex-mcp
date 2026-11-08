@@ -590,6 +590,50 @@ describe("vortexControl: deployMods", () => {
     expect(emit).not.toHaveBeenCalled();
   });
 
+  it("rejects when expectedActiveGameId no longer matches, without emitting", async () => {
+    vi.mocked(selectors.activeGameId).mockReturnValue("skyrimse");
+    const { api, emit } = fakeModOperationApi();
+
+    await expect(deployMods(api, { activeGameId: "fallout4" })).rejects.toThrow(
+      /Active game changed/,
+    );
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("copes with IGame.executable being a function, as in Vortex's real IGame", async () => {
+    // Vortex declares IGame.executable as (discoveredPath?) => string; treating it as a
+    // string made path.basename throw a TypeError outside any try.
+    vi.mocked(selectors.currentGameDiscovery).mockReturnValueOnce({
+      path: "C:/games/skyrim",
+    } as never);
+    vi.mocked(selectors.currentGame).mockReturnValueOnce({
+      id: "skyrimse",
+      executable: (discovered?: string) => `${discovered ? "bin/" : ""}SkyrimSE.exe`,
+    } as never);
+    const { api, emit } = fakeModOperationApi();
+    emit.mockImplementation((_event: string, cb: (err: unknown) => void) => cb(null));
+
+    await expect(deployMods(api)).resolves.toMatchObject({ profileId: "p1" });
+    expect(execFile).toHaveBeenCalledWith(
+      "tasklist",
+      ["/FI", "IMAGENAME eq SkyrimSE.exe", "/FO", "CSV", "/NH"],
+      expect.anything(),
+      expect.any(Function),
+    );
+  });
+
+  it("rejects, and clears its timeout, when a deploy-mods listener throws synchronously", async () => {
+    vi.useFakeTimers();
+    const { api, emit, listeners } = fakeModOperationApi();
+    emit.mockImplementation(() => {
+      throw new Error("listener blew up");
+    });
+
+    await expect(deployMods(api)).rejects.toThrow(/listener blew up/);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(listeners.size).toBe(0);
+  });
+
   it("waits for the LOOT sort that follows the deploy and reports it done", async () => {
     const { api, emit, listeners, setPluginActivity } = fakeModOperationApi();
     emit.mockImplementation((_event: string, cb: (err: unknown) => void) => {
